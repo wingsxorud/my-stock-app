@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 
 # 1. 페이지 설정
-st.set_page_config(page_title="재미로 보는 주식 분석기", page_icon="💎", layout="wide", initial_sidebar_state="auto")
+st.set_page_config(page_title="행님 전용 주식 분석기 7.7.8", page_icon="💎", layout="wide", initial_sidebar_state="auto")
 
 # [캐싱] 종목 리스트
 @st.cache_data(ttl=3600)
@@ -51,7 +51,7 @@ hist_start = st.sidebar.date_input("기록 조회 시작일", datetime.now() - t
 hist_end = st.sidebar.date_input("기록 조회 종료일", datetime.now())
 
 # --- 메인 ---
-st.title("🚀 재미로 보는 주식 분석기")
+st.title("🚀 행님 전용 스마트 분석기 7.7.8")
 search_input = st.text_input("🔍 종목명 또는 코드(6자리) 입력", "")
 
 if search_input:
@@ -70,37 +70,44 @@ if search_input:
 
     if target_code:
         st.markdown("---")
-        with st.spinner(f'🚀 {target_name} 데이터 분석 중...'):
+        with st.spinner(f'🚀 {target_name} 데이터 분석 및 평가 중...'):
             df = fdr.DataReader(target_code, start=train_start)
             if not df.empty:
+                # 1. AI 예측
                 df_p = df.reset_index()[['Date', 'Close']].rename(columns={'Date':'ds', 'Close':'y'})
                 m = Prophet(daily_seasonality=True, yearly_seasonality=True).fit(df_p)
                 future = m.make_future_dataframe(periods=forecast_days)
                 forecast = m.predict(future)
                 
+                # 2. 분석 지표 계산
                 news_weight, news_list = analyze_news_sentiment(target_name)
-                last_val = int(df['Close'].iloc[-1])
                 
+                # 실제 종가 (가장 최근 데이터)
+                actual_last_val = int(df['Close'].iloc[-1])
+                
+                # AI 당일 적정가
                 today_str = datetime.now().strftime('%Y-%m-%d')
                 today_forecast = forecast[forecast['ds'].dt.strftime('%Y-%m-%d') == today_str]
                 today_pred_val = int(today_forecast.iloc[0]['yhat']) if not today_forecast.empty else int(forecast[forecast['ds'] > df.index[-1]].iloc[0]['yhat'])
+                
+                # 뉴스 반영 목표가
                 final_target_val = int(forecast.iloc[-1]['yhat'] * (1 + news_weight))
                 
-                # --- 상단 지표 출력 (불필요한 안내문구 제거) ---
+                # --- 상단 4단 지표 (비교 로직 강화) ---
                 c1, c2, c3, c4 = st.columns(4)
-                
                 with c1:
-                    st.metric("💰 현재가", f"{last_val:,}원")
+                    st.metric("💰 실제 종가(현재가)", f"{actual_last_val:,}원")
                 with c2:
-                    st.metric("☀️ 당일 종가(예측)", f"{today_pred_val:,}원", delta=f"{today_pred_val - last_val:,}원")
+                    st.metric("☀️ AI 당일 적정가", f"{today_pred_val:,}원", delta=f"실제대비 {actual_last_val - today_pred_val:,}원")
                 with c3:
                     sentiment_label = "긍정" if news_weight > 0 else "부정" if news_weight < 0 else "중립"
                     st.metric(f"📰 뉴스반영 ({sentiment_label})", f"{final_target_val:,}원", delta=f"D-{forecast_days} 목표")
                 with c4:
-                    day_change_pct = ((today_pred_val - last_val) / last_val) * 100
-                    st.metric("🎯 당일 예상 등락", f"{day_change_pct:+.2f}%")
+                    diff_pct = ((actual_last_val - today_pred_val) / today_pred_val) * 100
+                    status = "과열(고평가)" if diff_pct > 0 else "침체(저평가)"
+                    st.metric(f"🎯 시장 평가 ({status})", f"{diff_pct:+.2f}%")
 
-                # 그래프
+                # 그래프 (이전 스타일 유지)
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='실제 주가', line=dict(color='#00ff00', width=3)))
                 pred_only = forecast[forecast['ds'] >= df.index[-1]]
@@ -109,7 +116,6 @@ if search_input:
                 fig.update_layout(template='plotly_dark', height=550, margin=dict(l=10, r=10, t=10, b=10), hovermode='x unified', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                 st.plotly_chart(fig, use_container_width=True)
 
-                # 하단 뉴스 및 기록
                 col_news, col_hist = st.columns(2)
                 with col_news:
                     st.subheader(f"📰 {target_name} 뉴스")
