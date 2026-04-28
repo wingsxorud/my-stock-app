@@ -7,17 +7,17 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 
-# [수정] 페이지 설정 - 사이드바를 기본적으로 숨김(collapsed)으로 설정
+# [수정] 페이지 설정 - auto로 설정하여 기기 화면 크기에 따라 브라우저가 판단하게 합니다.
 st.set_page_config(
-    page_title="믿거나 말거나 전용 주식 분석기 7.5.4", 
+    page_title="행님 전용 주식 분석기 7.5.5", 
     page_icon="💎", 
     layout="wide",
-    initial_sidebar_state="collapsed" # 요게 핵심입니다 행님!
+    initial_sidebar_state="auto" # PC는 보이고, 모바일은 숨겨지는 스마트 설정!
 )
 
-# 1. 실시간 시세 및 지수
+# 1. 실시간 시세 및 지수 (모바일 우회 로직)
 def get_realtime_data(stock_code=None):
-    headers = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)"}
+    headers = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15"}
     try:
         idx_url = "https://m.stock.naver.com/"
         res = requests.get(idx_url, headers=headers, timeout=5)
@@ -40,7 +40,7 @@ def get_realtime_data(stock_code=None):
     except:
         return None
 
-# 2. 뉴스 가져오기 (자동 동기화 로직 유지)
+# 2. 뉴스 가져오기 (자동 동기화 로직)
 def get_latest_news(stock_name):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     news_list = []
@@ -59,7 +59,7 @@ def get_latest_news(stock_name):
         pass
     return news_list
 
-# --- 사이드바 설정 (이제 기본으로 숨어있습니다) ---
+# --- 사이드바 설정 ---
 st.sidebar.title("💎 프리미엄 설정")
 market_data = get_realtime_data()
 if market_data:
@@ -76,7 +76,7 @@ hist_start = st.sidebar.date_input("조회 시작일", datetime.now() - timedelt
 hist_end = st.sidebar.date_input("조회 종료일", datetime.now())
 
 # --- 메인 화면 ---
-st.title("🚀 믿거나 말거나 스마트 분석기 7.5.4")
+st.title("🚀 행님 전용 스마트 분석기 7.5.5")
 search_name = st.text_input("🔍 분석할 종목명을 입력하세요", "")
 
 if search_name:
@@ -129,13 +129,13 @@ if search_name:
                 df_hist = fdr.DataReader(stock_code, start=hist_start, end=hist_end)
                 st.dataframe(df_hist.sort_index(ascending=False), use_container_width=True)
 
-            # 뉴스 자동 업데이트
+            # 뉴스 데이터 동기화
             news_data = get_latest_news(target_name)
             if news_data:
                 with news_container.container():
                     for n in news_data:
                         st.markdown(f"✅ [{n['title']}]({n['link']})")
             else:
-                news_container.warning("⚠️ 뉴스를 찾을 수 없습니다.")
+                news_container.warning("⚠️ 뉴스를 불러오지 못했습니다.")
         else:
             st.error("종목을 찾을 수 없습니다.")
