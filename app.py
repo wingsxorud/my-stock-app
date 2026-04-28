@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 # 페이지 설정
 st.set_page_config(
-    page_title="행님 전용 주식 분석기 7.5.7", 
+    page_title="믿거나 말거나 주식 분석기 7.5.8", 
     page_icon="💎", 
     layout="wide",
     initial_sidebar_state="auto"
@@ -73,35 +73,30 @@ hist_start = st.sidebar.date_input("기록 조회 시작일", datetime.now() - t
 hist_end = st.sidebar.date_input("기록 조회 종료일", datetime.now())
 
 # --- 메인 화면 ---
-st.title("🚀 행님 전용 스마트 분석기 7.5.7")
+st.title("🚀 믿거나 말거나 스마트 분석기 7.5.8")
 search_input = st.text_input("🔍 종목명 또는 코드를 입력하세요", "")
 
 if search_input:
-    # 종목 리스트 불러오기 (캐싱을 통해 속도 향상 가능하지만 여기선 생략)
     stocks = fdr.StockListing('KRX')
     
-    # 1. 검색어 필터링
     if search_input.isdigit():
         matched = stocks[stocks['Code'] == search_input]
     else:
         matched = stocks[stocks['Name'].str.contains(search_input, case=False, na=False)]
     
     if not matched.empty:
-        # [핵심 추가] 검색 결과가 여러 개일 경우 선택 박스 노출
         if len(matched) > 1:
-            st.info(f"💡 '{search_input}' 관련 종목이 {len(matched)}개 검색되었습니다. 분석할 종목을 선택하세요.")
-            # 종목명과 코드를 합쳐서 보여줌
+            st.info(f"💡 '{search_input}' 관련 종목이 {len(matched)}개 있습니다. 하나를 선택하쇼.")
             options = [f"{row['Name']} ({row['Code']})" for _, row in matched.iterrows()]
             selected_option = st.selectbox("종목 선택", options)
-            # 선택된 옵션에서 코드만 다시 추출
             final_code = selected_option.split('(')[1].replace(')', '')
             final_name = selected_option.split(' (')[0]
         else:
             final_code = matched.iloc[0]['Code']
             final_name = matched.iloc[0]['Name']
 
-        # 2. 분석 시작
-        with st.spinner(f'[{final_name}] 데이터 분석 엔진 가동 중...'):
+        # 분석 엔진 가동
+        with st.spinner(f'[{final_name}] 정밀 분석 중...'):
             rt_data = get_realtime_data(final_code)
             df_all = fdr.DataReader(final_code, start=train_start)
             
@@ -112,13 +107,48 @@ if search_input:
             future = model.make_future_dataframe(periods=forecast_days)
             forecast = model.predict(future)
             
-            # 상단 지표
-            st.subheader(f"📊 {final_name} ({final_code}) 분석 리포트")
+            # 상단 지표 (에러 수정 완료)
+            st.subheader(f"📊 {final_name} ({final_code}) 리포트")
             real_price = int(rt_data["PRICE"]) if rt_data and rt_data["PRICE"] else df_all['Close'].iloc[-1]
             
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("현재가", f"{real_price:,}원")
-            today_pred = forecast[forecast['ds'].dt.date == datetime.now().date()]
+            
+            today_date = datetime.now().date()
+            today_pred = forecast[forecast['ds'].dt.date == today_date]
             if not today_pred.empty:
                 c2.metric("오늘 적정가", f"{int(today_pred.iloc[0]['yhat']):,}원")
-            c3.metric(f
+            else:
+                c2.metric("오늘 적정가", "산출 불가")
+
+            # [핵심] c3, c4 괄호 오류 완벽 수정
+            pred_val = forecast.iloc[-1]['yhat']
+            c3.metric(f"{forecast_days}일 후 예상", f"{int(pred_val):,}원")
+            c4.metric("최종 등락률", f"{((pred_val-real_price)/real_price)*100:+.2f}%")
+
+            # 그래프
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=df_all.index, y=df_all['Close'], name='실제 주가', line=dict(color='#00ff00')))
+            fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], name='AI 예측', line=dict(color='#ff00ff', dash='dot')))
+            fig.update_layout(template='plotly_dark', height=450, margin=dict(l=10, r=10, t=10, b=10))
+            st.plotly_chart(fig, use_container_width=True)
+
+            # 뉴스 & 기록 (하단 레이아웃)
+            col_left, col_right = st.columns(2)
+            with col_left:
+                st.subheader("📰 최신 주요 뉴스")
+                news_container = st.empty()
+                news_data = get_latest_news(final_name)
+                if news_data:
+                    with news_container.container():
+                        for n in news_data:
+                            st.markdown(f"✅ [{n['title']}]({n['link']})")
+                else:
+                    news_container.warning("뉴스를 찾지 못했습니다.")
+            
+            with col_right:
+                st.subheader("📋 과거 주가 기록")
+                df_hist = fdr.DataReader(final_code, start=hist_start, end=hist_end)
+                st.dataframe(df_hist.sort_index(ascending=False), use_container_width=True)
+    else:
+        st.error("검색 결과가 없습니다.")
