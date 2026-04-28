@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 
 # 1. 페이지 설정
-st.set_page_config(page_title="행님 전용 주식 분석기 7.7.3", page_icon="💎", layout="wide", initial_sidebar_state="auto")
+st.set_page_config(page_title="행님 전용 주식 분석기 7.7.4", page_icon="💎", layout="wide", initial_sidebar_state="auto")
 
 # [캐싱] 종목 리스트
 @st.cache_data(ttl=3600)
@@ -23,8 +23,8 @@ def get_stock_list():
 # 뉴스 감성 분석 엔진
 def analyze_news_sentiment(stock_name):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    pos_words = ['상승', '호재', '돌파', '수익', '긍정', '목표가 상향', '성장', '최고', '강세', '확대', '기대']
-    neg_words = ['하락', '악재', '우려', '손실', '부정', '목표가 하향', '위기', '최저', '약세', '축소', '하락세']
+    pos_words = ['상승', '호재', '돌파', '수익', '긍정', '목표가 상향', '성장', '최고', '강세', '확대', '기대', '우상향']
+    neg_words = ['하락', '악재', '우려', '손실', '부정', '목표가 하향', '위기', '최저', '약세', '축소', '하락세', '조정']
     
     sentiment_score = 0
     news_data = []
@@ -47,12 +47,12 @@ def analyze_news_sentiment(stock_name):
 # --- 사이드바 ---
 st.sidebar.title("💎 프리미엄 설정")
 train_start = st.sidebar.date_input("학습 시작일", datetime(2023, 1, 1))
-forecast_days = st.sidebar.slider("예측 기간", 1, 365, 30)
+forecast_days = st.sidebar.slider("미래 예측 기간 (일)", 1, 365, 30)
 hist_start = st.sidebar.date_input("기록 조회 시작일", datetime.now() - timedelta(days=7))
 hist_end = st.sidebar.date_input("기록 조회 종료일", datetime.now())
 
 # --- 메인 ---
-st.title("🚀 행님 전용 스마트 분석기 7.7.3")
+st.title("🚀 행님 전용 스마트 분석기 7.7.4")
 search_input = st.text_input("🔍 종목명 또는 코드(6자리) 입력", "")
 
 if search_input:
@@ -71,62 +71,72 @@ if search_input:
 
     if target_code:
         st.markdown("---")
-        with st.spinner(f'🚀 {target_name} 시각화 분석 중...'):
+        with st.spinner(f'🚀 {target_name} 정밀 지표 산출 중...'):
             df = fdr.DataReader(target_code, start=train_start)
             if not df.empty:
                 # 1. AI 예측
                 df_p = df.reset_index()[['Date', 'Close']].rename(columns={'Date':'ds', 'Close':'y'})
-                m = Prophet(daily_seasonality=False, yearly_seasonality=True).fit(df_p)
+                m = Prophet(daily_seasonality=True, yearly_seasonality=True).fit(df_p) # 당일 예측을 위해 daily 활성화
                 future = m.make_future_dataframe(periods=forecast_days)
                 forecast = m.predict(future)
                 
-                # 2. 뉴스 분석 및 가중치 반영
+                # 2. 뉴스 분석 및 데이터 추출
                 news_weight, news_list = analyze_news_sentiment(target_name)
                 last_val = int(df['Close'].iloc[-1])
-                ai_pred_last = int(forecast.iloc[-1]['yhat'])
-                final_pred = int(ai_pred_last * (1 + news_weight))
                 
-                # 지표 출력
-                c1, c2, c3 = st.columns(3)
+                # 오늘 날짜 예측값 추출
+                today_str = datetime.now().strftime('%Y-%m-%d')
+                today_forecast = forecast[forecast['ds'].dt.strftime('%Y-%m-%d') == today_str]
+                
+                if not today_forecast.empty:
+                    today_pred_val = int(today_forecast.iloc[0]['yhat'])
+                else:
+                    today_pred_val = int(forecast[forecast['ds'] > df.index[-1]].iloc[0]['yhat'])
+                
+                # 뉴스 반영 최종 예측 (선택 기간의 마지막 날 기준)
+                final_target_val = int(forecast.iloc[-1]['yhat'] * (1 + news_weight))
+                
+                # --- 상단 4단 지표 출력 ---
+                c1, c2, c3, c4 = st.columns(4)
                 c1.metric("현재가", f"{last_val:,}원")
+                
+                # 당일 종가 예측 (AI 기반)
+                c2.metric("당일 종가(예측)", f"{today_pred_val:,}원", delta=f"{today_pred_val - last_val:,}원")
+                
+                # 뉴스 반영 예측 (중립/긍정/부정)
                 sentiment_label = "긍정" if news_weight > 0 else "부정" if news_weight < 0 else "중립"
-                c2.metric(f"뉴스 반영 예측 ({sentiment_label})", f"{final_pred:,}원", delta=f"{news_weight*100:+.1f}%")
-                c3.metric("최종 예상 등락", f"{((final_pred-last_val)/last_val)*100:+.2f}%")
+                c3.metric(f"뉴스반영예측 ({sentiment_label})", f"{final_target_val:,}원", delta=f"{news_weight*100:+.1f}%")
+                
+                # 당일 예상 등락률
+                day_change_pct = ((today_pred_val - last_val) / last_val) * 100
+                c4.metric("당일 예상 등락", f"{day_change_pct:+.2f}%")
 
-                # 3. 그래프 보강 (선명도 강화)
+                # 3. 그래프 (보안 및 시각화 강화)
                 fig = go.Figure()
-                # 실제 주가 선 (녹색)
                 fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='실제 주가', line=dict(color='#00ff00', width=3)))
                 
-                # AI 기본 예측선 (회색 점선 - 두께 보강)
-                # 실제 데이터 끝점과 연결되도록 예측 데이터만 필터링
                 pred_only = forecast[forecast['ds'] >= df.index[-1]]
                 fig.add_trace(go.Scatter(x=pred_only['ds'], y=pred_only['yhat'], name='AI 예측선', 
                                          line=dict(color='#aaaaaa', width=2, dash='dash')))
                 
-                # 뉴스 반영 목표가 별 표시 (분홍색 - 크기 키움)
+                # 최종 목표가 별 표시
                 fig.add_trace(go.Scatter(
-                    x=[pred_only['ds'].iloc[-1]], 
-                    y=[final_pred], 
-                    name='뉴스 반영 목표가', 
-                    mode='markers+text',
-                    text=["목표가"],
+                    x=[pred_only['ds'].iloc[-1]], y=[final_target_val], 
+                    name='뉴스 반영 목표가', mode='markers+text', text=["최종목표"],
                     textposition="top center",
                     marker=dict(color='#ff00ff', size=15, symbol='star', line=dict(color='white', width=1))
                 ))
                 
                 fig.update_layout(
-                    template='plotly_dark', height=600, 
-                    margin=dict(l=10, r=10, t=10, b=10),
-                    hovermode='x unified',
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    template='plotly_dark', height=600, margin=dict(l=10, r=10, t=10, b=10),
+                    hovermode='x unified', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-                # 하단 리스트 (뉴스/기록)
+                # 하단 정보 (뉴스/기록)
                 col_news, col_hist = st.columns(2)
                 with col_news:
-                    st.subheader(f"📰 {target_name} 뉴스")
+                    st.subheader(f"📰 {target_name} 주요 뉴스")
                     for n in news_list[:5]: st.markdown(f"✅ [{n['title']}]({n['link']})")
                 
                 with col_hist:
