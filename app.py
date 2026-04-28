@@ -8,11 +8,11 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 
 # 페이지 설정
-st.set_page_config(page_title="행님 전용 주식 분석기 7.5.2", page_icon="💎", layout="wide")
+st.set_page_config(page_title="행님 전용 주식 분석기 7.5.3", page_icon="💎", layout="wide")
 
 # 1. 실시간 시세 및 지수
 def get_realtime_data(stock_code=None):
-    headers = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15"}
+    headers = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)"}
     try:
         idx_url = "https://m.stock.naver.com/"
         res = requests.get(idx_url, headers=headers, timeout=5)
@@ -35,14 +35,16 @@ def get_realtime_data(stock_code=None):
     except:
         return None
 
-# 2. 뉴스 가져오기
+# 2. 뉴스 가져오기 (2중 백업: 구글 + 연합뉴스)
 def get_latest_news(stock_name):
-    url = f"https://www.google.com/search?q={stock_name}+주식+뉴스&tbm=nws&hl=ko"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    news_list = []
+    
+    # [1차 시도] 구글 뉴스
     try:
-        res = requests.get(url, headers=headers, timeout=7)
+        url = f"https://www.google.com/search?q={stock_name}+주식+뉴스&tbm=nws&hl=ko"
+        res = requests.get(url, headers=headers, timeout=5)
         soup = BeautifulSoup(res.text, 'html.parser')
-        news_list = []
         items = soup.select('div.SoS91') or soup.select('a[jsname="ACyX8b"]')
         for item in items[:5]:
             title_tag = item.select_one('div.n0W69d') or item
@@ -50,9 +52,22 @@ def get_latest_news(stock_name):
             link = item.find('a')['href'] if item.name != 'a' else item['href']
             if link.startswith('/'): link = "https://www.google.com" + link
             news_list.append({"title": title, "link": link})
-        return news_list
     except:
-        return None
+        pass
+
+    # [2차 시도] 뉴스핌 (백업)
+    if not news_list:
+        try:
+            url = f"https://www.newspim.com/search/?search_category=all&search_keyword={stock_name}"
+            res = requests.get(url, headers=headers, timeout=5)
+            soup = BeautifulSoup(res.text, 'html.parser')
+            items = soup.select('div.news_list > dl > dt > a')
+            for item in items[:5]:
+                news_list.append({"title": item.get_text().strip(), "link": "https://www.newspim.com" + item['href'] if item['href'].startswith('/') else item['href']})
+        except:
+            pass
+            
+    return news_list
 
 # --- 사이드바 및 설정 ---
 st.sidebar.title("💎 프리미엄 설정")
@@ -71,7 +86,7 @@ hist_start = st.sidebar.date_input("조회 시작일", datetime.now() - timedelt
 hist_end = st.sidebar.date_input("조회 종료일", datetime.now())
 
 # --- 메인 화면 ---
-st.title("🚀 행님 전용 스마트 분석기 7.5.2")
+st.title("🚀 행님 전용 스마트 분석기 7.5.3")
 search_name = st.text_input("🔍 분석할 종목명을 입력하세요", "")
 
 if search_name:
@@ -93,23 +108,15 @@ if search_name:
             future = model.make_future_dataframe(periods=forecast_days)
             forecast = model.predict(future)
             
-            # 지표 출력 (에러 수정 부분)
+            # 지표 출력
             st.subheader(f"📊 {target_name} ({stock_code}) 분석 결과")
             real_price = int(rt_data["PRICE"]) if rt_data and rt_data["PRICE"] else df_all['Close'].iloc[-1]
             
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("현재 실시간가", f"{real_price:,}원")
-            
-            # [오타 수정 완료] 괄호와 속성 접근 정확히 보정
-            today_date = datetime.now().date()
-            today_pred = forecast[forecast['ds'].dt.date == today_date]
-            
+            today_pred = forecast[forecast['ds'].dt.date == datetime.now().date()]
             if not today_pred.empty:
-                today_val = today_pred.iloc[0]['yhat']
-                c2.metric("AI 추천 오늘 적정가", f"{int(today_val):,}원")
-            else:
-                c2.metric("AI 추천 오늘 적정가", "계산 중")
-
+                c2.metric("AI 추천 오늘 적정가", f"{int(today_pred.iloc[0]['yhat']):,}원")
             c3.metric(f"{forecast_days}일 후 예상", f"{int(forecast.iloc[-1]['yhat']):,}원")
             c4.metric("최종 등락률", f"{((forecast.iloc[-1]['yhat']-real_price)/real_price)*100:+.2f}%")
 
@@ -120,27 +127,29 @@ if search_name:
             fig.update_layout(template='plotly_dark', height=450, margin=dict(l=10, r=10, t=10, b=10))
             st.plotly_chart(fig, use_container_width=True)
 
-            # --- [행님 요청 레이아웃] 뉴스(왼) & 과거 기록(오른) ---
+            # --- [레이아웃 유지] 뉴스 & 과거 기록 ---
             col_left, col_right = st.columns(2)
             
             with col_left:
                 st.subheader("📰 최신 주요 뉴스")
-                news_placeholder = st.empty()
-                news_placeholder.info("🔄 뉴스를 자동으로 가져오는 중입니다...")
+                # [자동 동기화 핵심] 빈 컨테이너 먼저 생성
+                news_container = st.empty()
+                news_container.info("🔄 뉴스를 동기화하는 중입니다...")
             
             with col_right:
                 st.subheader("📋 과거 주가 기록")
                 df_hist = fdr.DataReader(stock_code, start=hist_start, end=hist_end)
                 st.dataframe(df_hist.sort_index(ascending=False), use_container_width=True)
 
-            # --- 뉴스 자동 갱신 로직 ---
+            # --- 뉴스 데이터 실시간 동기화 ---
             news_data = get_latest_news(target_name)
             if news_data:
-                with news_placeholder.container():
+                # 데이터가 준비되면 info 메시지를 지우고 리스트로 교체
+                with news_container.container():
                     for n in news_data:
                         st.markdown(f"✅ [{n['title']}]({n['link']})")
             else:
-                news_placeholder.warning("⚠️ 뉴스를 불러오지 못했습니다. 잠시 후 새로고침 해주세요.")
+                news_container.warning("⚠️ 뉴스를 찾을 수 없습니다. (포털 서버 확인 중)")
 
         else:
             st.error("종목을 찾을 수 없습니다.")
