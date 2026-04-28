@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 # [수정] 페이지 설정 - auto로 설정하여 기기 화면 크기에 따라 브라우저가 판단하게 합니다.
 st.set_page_config(
-    page_title="행님 전용 주식 분석기 7.5.5", 
+    page_title="믿거나 말거나 주식 분석기 7.5.5", 
     page_icon="💎", 
     layout="wide",
     initial_sidebar_state="auto" # PC는 보이고, 모바일은 숨겨지는 스마트 설정!
@@ -76,7 +76,7 @@ hist_start = st.sidebar.date_input("조회 시작일", datetime.now() - timedelt
 hist_end = st.sidebar.date_input("조회 종료일", datetime.now())
 
 # --- 메인 화면 ---
-st.title("🚀 행님 전용 스마트 분석기 7.5.5")
+st.title("🚀 믿거나 말거나 스마트 분석기 7.5.5")
 search_name = st.text_input("🔍 분석할 종목명을 입력하세요", "")
 
 if search_name:
