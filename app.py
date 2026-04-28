@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 # 페이지 설정
 st.set_page_config(
-    page_title="믿거나 말거나 주식 분석기 7.5.9", 
+    page_title="내 주식 오를까 내릴까???", 
     page_icon="💎", 
     layout="wide",
     initial_sidebar_state="auto"
@@ -66,7 +66,7 @@ hist_start = st.sidebar.date_input("기록 조회 시작일", datetime.now() - t
 hist_end = st.sidebar.date_input("기록 조회 종료일", datetime.now())
 
 # --- 메인 화면 ---
-st.title("🚀 믿거나 말거나 스마트 분석기 7.5.9")
+st.title("🚀 내 주식은 오를까??? 내릴까???")
 search_input = st.text_input("🔍 종목명 또는 코드를 입력하세요", "")
 
 if search_input:
