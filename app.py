@@ -107,4 +107,9 @@ if search_input:
                                 "시가": st.column_config.NumberColumn("시가", format="%d"),
                                 "고가": st.column_config.NumberColumn("고가", format="%d"),
                                 "저가": st.column_config.NumberColumn("저가", format="%d"),
-                                "종가": st.column_config.NumberColumn
+                                "종가": st.column_config.NumberColumn("종가", format="%d"),
+                                "거래량": st.column_config.NumberColumn("거래량", format="%d"),
+                                "변동률": st.column_config.NumberColumn("변동률", format="%.4f")
+                            }
+                        )
+                    else: st.warning("해당 기간의 기록이 없습니다.")
