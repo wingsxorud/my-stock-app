@@ -65,7 +65,7 @@ def analyze_news_sentiment(stock_name):
 
 # --- 사이드바 및 메인 ---
 # ... (중략: 사이드바 설정 부분)
-st.sidebar.title("💎 프리미엄 설정")
+st.sidebar.title("💎 세부 설정")
 train_start = st.sidebar.date_input("학습 시작일", datetime(2023, 1, 1))
 forecast_days = st.sidebar.slider("미래 예측 기간 (일)", 1, 365, 30)
 hist_start = st.sidebar.date_input("기록 조회 시작일", datetime.now() - timedelta(days=7))
