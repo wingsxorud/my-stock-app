@@ -8,9 +8,9 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 
 # 1. 페이지 설정
-st.set_page_config(page_title="행님 전용 주식 분석기 7.6.9", page_icon="💎", layout="wide", initial_sidebar_state="auto")
+st.set_page_config(page_title="행님 전용 주식 분석기 7.7.0", page_icon="💎", layout="wide", initial_sidebar_state="auto")
 
-# [캐싱] 국내 종목(주식+ETF) 리스트만 유지
+# [캐싱] 국내 종목 리스트
 @st.cache_data(ttl=3600)
 def get_stock_list():
     try:
@@ -41,7 +41,7 @@ hist_start = st.sidebar.date_input("기록 조회 시작일", datetime.now() - t
 hist_end = st.sidebar.date_input("기록 조회 종료일", datetime.now())
 
 # --- 메인 ---
-st.title("🚀 행님 전용 스마트 분석기 7.6.9")
+st.title("🚀 행님 전용 스마트 분석기 7.7.0")
 search_input = st.text_input("🔍 종목명 또는 코드(6자리) 입력", "")
 
 if search_input:
@@ -76,14 +76,13 @@ if search_input:
                 c2.metric("AI 적정가", f"{pred_val:,}원")
                 c3.metric("예상 등락", f"{((pred_val-last_val)/last_val)*100:+.2f}%")
 
-                # 그래프 (7.6.7 스타일 유지)
+                # 그래프
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='실제', line=dict(color='#00ff00', width=3)))
                 fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], name='예측', line=dict(color='#ff00ff', width=3, dash='dot')))
                 fig.update_layout(template='plotly_dark', height=500, margin=dict(l=10, r=10, t=10, b=10), hovermode='x unified')
                 st.plotly_chart(fig, use_container_width=True)
 
-                # 하단 섹션
                 col_news, col_hist = st.columns(2)
                 with col_news:
                     st.subheader("📰 최신 뉴스")
@@ -93,23 +92,28 @@ if search_input:
                     st.subheader("📋 과거 주가 기록")
                     df_hist = fdr.DataReader(target_code, start=hist_start, end=hist_end)
                     if not df_hist.empty:
-                        df_hist_display = df_hist.copy()
+                        # [절대 쉼표 로직] 데이터프레임 변환
+                        df_hist_display = df_hist.copy().sort_index(ascending=False)
+                        
+                        # 1. 날짜 형식 깔끔하게
+                        df_hist_display.index = df_hist_display.index.strftime('%Y-%m-%d')
+                        
+                        # 2. 모든 숫자에 쉼표를 찍고 '문자열'로 강제 변환
+                        for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+                            if col in df_hist_display.columns:
+                                df_hist_display[col] = df_hist_display[col].apply(lambda x: f"{int(x):,}")
+                        
+                        # 3. 변동률만 소수점 유지
+                        if 'Change' in df_hist_display.columns:
+                            df_hist_display['Change'] = df_hist_display['Change'].apply(lambda x: f"{x:+.4f}")
+
+                        # 4. 컬럼명 한글화
                         df_hist_display = df_hist_display.rename(columns={
                             'Open': '시가', 'High': '고가', 'Low': '저가', 
                             'Close': '종가', 'Volume': '거래량', 'Change': '변동률'
                         })
                         
-                        # [콤마 표시 핵심 설정]
-                        st.dataframe(
-                            df_hist_display.sort_index(ascending=False), 
-                            use_container_width=True,
-                            column_config={
-                                "시가": st.column_config.NumberColumn("시가", format="%d"),
-                                "고가": st.column_config.NumberColumn("고가", format="%d"),
-                                "저가": st.column_config.NumberColumn("저가", format="%d"),
-                                "종가": st.column_config.NumberColumn("종가", format="%d"),
-                                "거래량": st.column_config.NumberColumn("거래량", format="%d"),
-                                "변동률": st.column_config.NumberColumn("변동률", format="%.4f")
-                            }
-                        )
+                        # 출력 (데이터 타입을 문자열로 바꿨으므로 스트림릿이 함부로 못 건드림)
+                        st.table(df_hist_display) # 더 확실한 가독성을 위해 st.table 권장 (혹은 st.dataframe)
+                        
                     else: st.warning("해당 기간의 기록이 없습니다.")
