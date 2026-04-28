@@ -118,4 +118,29 @@ if search_name:
             fig.add_trace(go.Scatter(x=df_all.index, y=df_all['Close'], name='과거 주가', line=dict(color='#00ff00')))
             fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], name='AI 예측', line=dict(color='#ff00ff', dash='dot')))
             fig.update_layout(template='plotly_dark', height=450, margin=dict(l=10, r=10, t=10, b=10))
-            st.plotly_chart(fig, use_container_width=
+            st.plotly_chart(fig, use_container_width=True)
+
+            # --- [행님 요청 레이아웃] 뉴스(왼) & 과거 기록(오른) ---
+            col_left, col_right = st.columns(2)
+            
+            with col_left:
+                st.subheader("📰 최신 주요 뉴스")
+                news_placeholder = st.empty()
+                news_placeholder.info("🔄 뉴스를 자동으로 가져오는 중입니다...")
+            
+            with col_right:
+                st.subheader("📋 과거 주가 기록")
+                df_hist = fdr.DataReader(stock_code, start=hist_start, end=hist_end)
+                st.dataframe(df_hist.sort_index(ascending=False), use_container_width=True)
+
+            # --- 뉴스 자동 갱신 로직 ---
+            news_data = get_latest_news(target_name)
+            if news_data:
+                with news_placeholder.container():
+                    for n in news_data:
+                        st.markdown(f"✅ [{n['title']}]({n['link']})")
+            else:
+                news_placeholder.warning("⚠️ 뉴스를 불러오지 못했습니다. 잠시 후 새로고침 해주세요.")
+
+        else:
+            st.error("종목을 찾을 수 없습니다.")
