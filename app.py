@@ -9,13 +9,13 @@ from datetime import datetime, timedelta
 
 # 1. 페이지 설정
 st.set_page_config(
-    page_title="행님 전용 주식 분석기 7.6.0", 
+    page_title="믿거나 말거나 주식 분석기 7.6.1", 
     page_icon="💎", 
     layout="wide",
     initial_sidebar_state="auto"
 )
 
-# [함수 로직은 동일하여 중복 생략, 전체 코드 필요시 위쪽 7.6.0 참고 부탁드림돠!]
+# 2. 실시간 시세/지수 함수
 def get_realtime_data(stock_code=None):
     headers = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)"}
     try:
@@ -36,6 +36,7 @@ def get_realtime_data(stock_code=None):
         return {"KOSPI": (kpi, kpi_chg), "KOSDAQ": (kdq, kdq_chg), "PRICE": current_price}
     except: return None
 
+# 3. 뉴스 가져오기 함수
 def get_latest_news(stock_name):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     news_list = []
@@ -53,43 +54,37 @@ def get_latest_news(stock_name):
     except: pass
     return news_list
 
-# --- 사이드바 설정 (에러 난 부분 집중 수정) ---
+# --- 사이드바 설정 ---
 st.sidebar.title("💎 프리미엄 설정")
 market_data = get_realtime_data()
 if market_data:
     st.sidebar.metric("KOSPI", market_data["KOSPI"][0], market_data["KOSPI"][1])
     st.sidebar.metric("KOSDAQ", market_data["KOSDAQ"][0], market_data["KOSDAQ"][1])
-
 st.sidebar.markdown("---")
 train_start = st.sidebar.date_input("AI 학습 시작일", datetime(2023, 1, 1))
 forecast_days = st.sidebar.slider("미래 예측 기간 (일)", 1, 365, 30)
-
-# [여기가 에러 난 지점입니다!] 따옴표와 괄호를 완벽하게 닫았습니다.
 hist_start = st.sidebar.date_input("기록 조회 시작일", datetime.now() - timedelta(days=7))
 hist_end = st.sidebar.date_input("기록 조회 종료일", datetime.now())
 
 # --- 메인 화면 ---
-st.title("🚀 행님 전용 스마트 분석기 7.6.0")
+st.title("🚀 믿거나 말거나 주식 분석기")
 search_input = st.text_input("🔍 종목명/ETF명 또는 코드를 입력하세요", "")
 
 if search_input:
-    with st.spinner('전체 시장 데이터(주식/ETF) 검색 중...'):
-        stocks = fdr.StockListing('KRX')[['Code', 'Name']]
-        etfs = fdr.StockListing('ETF/KR')[['Symbol', 'Name']].rename(columns={'Symbol':'Code'})
-        total_listing = pd.concat([stocks, etfs]).drop_duplicates(subset=['Code'])
+    stocks = fdr.StockListing('KRX')[['Code', 'Name']]
+    etfs = fdr.StockListing('ETF/KR')[['Symbol', 'Name']].rename(columns={'Symbol':'Code'})
+    total_listing = pd.concat([stocks, etfs]).drop_duplicates(subset=['Code'])
     
-    if search_input.isdigit():
-        matched = total_listing[total_listing['Code'] == search_input]
-    else:
-        matched = total_listing[total_listing['Name'].str.contains(search_input, case=False, na=False)]
+    if search_input.isdigit(): matched = total_listing[total_listing['Code'] == search_input]
+    else: matched = total_listing[total_listing['Name'].str.contains(search_input, case=False, na=False)]
     
     if not matched.empty:
         target_name, target_code = "", ""
         if len(matched) > 1:
-            st.markdown("### 🎯 어떤 종목(ETF)을 분석할까요?")
-            options = ["--- 목록에서 선택해 주세요 ---"] + [f"{row['Name']} ({row['Code']})" for _, row in matched.iterrows()]
-            selected_option = st.selectbox("검색 결과 리스트", options)
-            if selected_option != "--- 목록에서 선택해 주세요 ---":
+            st.markdown("### 🎯 분석 대상을 선택하세요")
+            options = ["--- 목록에서 선택 ---"] + [f"{row['Name']} ({row['Code']})" for _, row in matched.iterrows()]
+            selected_option = st.selectbox("검색 결과", options)
+            if selected_option != "--- 목록에서 선택 ---":
                 target_code = selected_option.split('(')[1].replace(')', '')
                 target_name = selected_option.split(' (')[0]
         else:
@@ -98,7 +93,7 @@ if search_input:
 
         if target_code:
             st.markdown("---")
-            with st.spinner(f'🚀 {target_name} 리포트 생성 중...'):
+            with st.spinner(f'🚀 {target_name} 리포트 분석 중...'):
                 rt_data = get_realtime_data(target_code)
                 df_all = fdr.DataReader(target_code, start=train_start)
                 df_p = df_all.reset_index()[['Date', 'Close']].rename(columns={'Date':'ds', 'Close':'y'})
@@ -107,38 +102,48 @@ if search_input:
                 future = model.make_future_dataframe(periods=forecast_days)
                 forecast = model.predict(future)
                 
-                st.subheader(f"📊 {target_name} ({target_code}) 분석 리포트")
+                # 상단 지표
+                st.subheader(f"📊 {target_name} ({target_code}) 리포트")
                 real_price = int(rt_data["PRICE"]) if rt_data and rt_data["PRICE"] else df_all['Close'].iloc[-1]
-                
                 c1, c2, c3, c4 = st.columns(4)
-                c1.metric("현재 실시간가", f"{real_price:,}원")
+                c1.metric("현재가", f"{real_price:,}원")
                 today_pred = forecast[forecast['ds'].dt.date == datetime.now().date()]
                 if not today_pred.empty:
                     c2.metric("오늘 적정가", f"{int(today_pred.iloc[0]['yhat']):,}원")
-                
                 pred_val = forecast.iloc[-1]['yhat']
-                c3.metric(f"{forecast_days}일 후 예상", f"{int(pred_val):,}원")
-                c4.metric("최종 예상 등락", f"{((pred_val-real_price)/real_price)*100:+.2f}%")
+                c3.metric(f"{forecast_days}일 후", f"{int(pred_val):,}원")
+                c4.metric("예상 등락", f"{((pred_val-real_price)/real_price)*100:+.2f}%")
 
+                # --- [그래프 가독성 수술 지점] ---
                 fig = go.Figure()
-                fig.add_trace(go.Scatter(x=df_all.index, y=df_all['Close'], name='실제 주가', line=dict(color='#00ff00')))
-                fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], name='AI 예측', line=dict(color='#ff00ff', dash='dot')))
-                fig.update_layout(template='plotly_dark', height=450, margin=dict(l=10, r=10, t=10, b=10))
+                # 실제 주가: 선 굵기 조절(width=3)
+                fig.add_trace(go.Scatter(x=df_all.index, y=df_all['Close'], name='실제', line=dict(color='#00ff00', width=3)))
+                # 예측 주가: 선 스타일 강조
+                fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], name='예측', line=dict(color='#ff00ff', width=3, dash='dot')))
+                
+                # 모바일 최적화 레이아웃 설정
+                fig.update_layout(
+                    template='plotly_dark',
+                    height=500, # 모바일에서 세로로 좀 더 길게 보이도록 조절
+                    margin=dict(l=10, r=10, t=10, b=10), # 여백 최소화
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), # 범례를 위로
+                    hovermode='x unified', # 모바일 터치 시 정보 한눈에 보기
+                    xaxis=dict(showgrid=False),
+                    yaxis=dict(showgrid=True, gridcolor='gray', gridwidth=0.1)
+                )
                 st.plotly_chart(fig, use_container_width=True)
 
                 col_left, col_right = st.columns(2)
                 with col_left:
-                    st.subheader("📰 최신 주요 뉴스")
+                    st.subheader("📰 최신 뉴스")
                     news_container = st.empty()
                     news_data = get_latest_news(target_name)
                     if news_data:
                         with news_container.container():
                             for n in news_data: st.markdown(f"✅ [{n['title']}]({n['link']})")
-                    else: news_container.warning("뉴스를 불러오지 못했습니다.")
-                
+                    else: news_container.warning("뉴스 없음")
                 with col_right:
-                    st.subheader("📋 과거 주가 기록")
+                    st.subheader("📋 주가 기록")
                     df_hist = fdr.DataReader(target_code, start=hist_start, end=hist_end)
                     st.dataframe(df_hist.sort_index(ascending=False), use_container_width=True)
-    else:
-        st.error("검색 결과가 없습니다.")
+    else: st.error("검색 결과 없음")
