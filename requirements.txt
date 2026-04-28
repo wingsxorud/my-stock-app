@@ -5,3 +5,4 @@ prophet
 matplotlib
 requests
 beautifulsoup4
+plotly
