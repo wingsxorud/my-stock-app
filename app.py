@@ -24,45 +24,65 @@ def get_market_status():
     if market_close < now <= after_market: return "종가 (애프터마켓)"
     return "종가 (장 마감)"
 
-# [개선] 뉴스 엔진 (언론사, 시간 정보 추가)
+# [긴급수정] 뉴스 분석 엔진 - 선택자 보강
 def analyze_news_sentiment(stock_name):
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
     pos_words = ['상승', '호재', '돌파', '수익', '긍정', '성장', '최고', '강세', '확대', '기대', '어닝서프라이즈', '계약체결', '신제품']
     neg_words = ['하락', '악재', '우려', '손실', '부정', '위기', '최저', '약세', '축소', '조정', '어닝쇼크', '유상증자', '소송']
     sentiment_score, news_data = 0, []
     try:
-        # 구글 뉴스 검색 결과 파싱 강화
+        # 구글 뉴스 검색
         url = f"https://www.google.com/search?q={stock_name}+주식+뉴스&tbm=nws&hl=ko"
-        res = requests.get(url, headers=headers, timeout=5)
+        res = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(res.text, 'html.parser')
         
-        # 뉴스 아이템 추출 (구글 뉴스 구조에 맞춰 선택자 조정)
-        items = soup.select('div.SoS91')[:10]
+        # 뉴스 카드 선택자 보강 (구조 변화 대응)
+        items = soup.select('div[data-ved]') or soup.select('.SoS91') or soup.select('.g')
+        
+        count = 0
         for i, item in enumerate(items):
-            title = item.select_one('div.n0W69d').get_text()
-            link = item.find('a')['href']
-            # [추가] 언론사 및 시간 정보 추출
-            source = item.select_one('div.Mg7d1.LrS9fe').get_text() if item.select_one('div.Mg7d1.LrS9fe') else "뉴스"
-            time_ago = item.select_one('div.OSrXXb.rbN62e').get_text() if item.select_one('div.OSrXXb.rbN62e') else "최근"
+            if count >= 6: break # 최대 6개만 표시
             
-            time_weight = max(0.5, 1.2 - (i * 0.1)) 
-            current_item_score = 0
-            for pw in pos_words:
-                if pw in title: current_item_score += 1
-            for nw in neg_words:
-                if nw in title: current_item_score -= 1
+            # 제목 및 링크 추출
+            t_tag = item.select_one('div.n0W69d') or item.select_one('.mCBkyc')
+            l_tag = item.find('a')
             
-            sentiment_score += (current_item_score * time_weight)
-            news_data.append({
-                "title": title, 
-                "link": link if link.startswith('http') else "https://www.google.com"+link,
-                "source": source,
-                "time": time_ago
-            })
+            if t_tag and l_tag:
+                title = t_tag.get_text()
+                link = l_tag['href']
+                
+                # 언론사 및 시간 (보수적 추출)
+                s_tag = item.select_one('.Mg7d1') or item.select_one('.UP5e8') or item.select_one('.XTj9nd')
+                t_ago_tag = item.select_one('.OSrXXb') or item.select_one('.Lf79rd')
+                
+                source = s_tag.get_text() if s_tag else "뉴스"
+                time_ago = t_ago_tag.get_text() if t_ago_tag else "최근"
+                
+                # 가중치 계산
+                time_weight = max(0.5, 1.2 - (count * 0.1)) 
+                current_item_score = 0
+                for pw in pos_words:
+                    if pw in title: current_item_score += 1
+                for nw in neg_words:
+                    if nw in title: current_item_score -= 1
+                
+                sentiment_score += (current_item_score * time_weight)
+                news_data.append({
+                    "title": title, 
+                    "link": link if link.startswith('http') else "https://www.google.com"+link,
+                    "source": source,
+                    "time": time_ago
+                })
+                count += 1
+                
         final_weight = max(min(sentiment_score * 0.015, 0.05), -0.05)
         return final_weight, news_data
-    except: return 0, []
+    except Exception as e:
+        # 에러 발생 시 로그 확인용 (사용자 화면엔 경고만)
+        print(f"News Error: {e}")
+        return 0, []
 
+# [나머지 함수 동일]
 @st.cache_data(ttl=3600)
 def get_stock_list():
     try:
@@ -71,7 +91,7 @@ def get_stock_list():
         return pd.concat([stocks, etfs]).drop_duplicates(subset=['Code'])
     except: return pd.DataFrame([{'Code': '005930', 'Name': '삼성전자'}])
 
-# --- 사이드바 ---
+# --- 사이드바 및 메인 ---
 st.sidebar.title("💎 세부 설정")
 train_start = st.sidebar.date_input("학습 시작일", datetime(2023, 1, 1))
 st.sidebar.markdown("---")
@@ -83,7 +103,6 @@ st.sidebar.markdown("---")
 hist_start = st.sidebar.date_input("기록 조회 시작일", datetime.now() - timedelta(days=7))
 hist_end = st.sidebar.date_input("기록 조회 종료일", datetime.now())
 
-# --- 메인 ---
 st.title("🚀 재미로 보는 주식 분석기")
 search_input = st.text_input("🔍 종목명 또는 코드(6자리) 입력", "")
 
@@ -102,7 +121,7 @@ if search_input:
 
         if target_code:
             st.markdown("---")
-            with st.spinner(f'🚀 {target_name} 최신 뉴스 및 데이터 분석 중...'):
+            with st.spinner(f'🚀 {target_name} 뉴스 및 차트 분석 중...'):
                 df = fdr.DataReader(target_code, start=train_start)
                 if not df.empty:
                     df_p = df.reset_index()[['Date', 'Close']].rename(columns={'Date':'ds', 'Close':'y'})
@@ -140,11 +159,14 @@ if search_input:
                     col_news, col_hist = st.columns(2)
                     with col_news:
                         st.subheader(f"📰 {target_name} 최신 뉴스")
-                        for n in news_list[:6]: 
-                            # [업그레이드 포인트] 언론사와 시간 정보 추가
-                            st.markdown(f"**[{n['source']}]** {n['time']}")
-                            st.markdown(f"✅ [{n['title']}]({n['link']})")
-                            st.markdown("---")
+                        if news_list:
+                            for n in news_list:
+                                st.markdown(f"**[{n['source']}]** {n['time']}")
+                                st.markdown(f"✅ [{n['title']}]({n['link']})")
+                                st.markdown("---")
+                        else:
+                            st.warning("⚠️ 현재 뉴스를 실시간으로 가져올 수 없습니다. 잠시 후 다시 시도해 주세요.")
+                            
                     with col_hist:
                         st.subheader("📋 주가 기록")
                         df_hist = fdr.DataReader(target_code, start=hist_start, end=hist_end)
