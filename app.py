@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 import pytz # 시간대 설정을 위해 필요 (pip install pytz)
 
 # 1. 페이지 설정
-st.set_page_config(page_title="행님 전용 주식 분석기 7.7.9", page_icon="💎", layout="wide", initial_sidebar_state="auto")
+st.set_page_config(page_title="재미로 보는 주식 분석기", page_icon="💎", layout="wide", initial_sidebar_state="auto")
 
 # [시간 판단 함수] 현재 장 상태에 따라 제목을 결정합니다.
 def get_market_status():
@@ -71,7 +71,7 @@ forecast_days = st.sidebar.slider("미래 예측 기간 (일)", 1, 365, 30)
 hist_start = st.sidebar.date_input("기록 조회 시작일", datetime.now() - timedelta(days=7))
 hist_end = st.sidebar.date_input("기록 조회 종료일", datetime.now())
 
-st.title("🚀 행님 전용 스마트 분석기 7.7.9")
+st.title("🚀 재미로 보는 주식 분석기")
 search_input = st.text_input("🔍 종목명 또는 코드(6자리) 입력", "")
 
 if search_input:
@@ -111,7 +111,7 @@ if search_input:
                     with c1:
                         st.metric(f"💰 {market_label}", f"{actual_last_val:,}원")
                     with c2:
-                        st.metric("☀️ AI 당일 적정가", f"{today_pred_val:,}원", delta=f"실제대비 {actual_last_val - today_pred_val:,}원")
+                        st.metric("☀️ AI 당일 예상가", f"{today_pred_val:,}원", delta=f"실제대비 {actual_last_val - today_pred_val:,}원")
                     with c3:
                         sentiment_label = "긍정" if news_weight > 0 else "부정" if news_weight < 0 else "중립"
                         st.metric(f"📰 뉴스반영 ({sentiment_label})", f"{final_target_val:,}원", delta=f"D-{forecast_days} 목표")
