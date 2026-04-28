@@ -7,8 +7,13 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 
-# 페이지 설정
-st.set_page_config(page_title="행님 전용 주식 분석기 7.5.3", page_icon="💎", layout="wide")
+# [수정] 페이지 설정 - 사이드바를 기본적으로 숨김(collapsed)으로 설정
+st.set_page_config(
+    page_title="믿거나 말거나 전용 주식 분석기 7.5.4", 
+    page_icon="💎", 
+    layout="wide",
+    initial_sidebar_state="collapsed" # 요게 핵심입니다 행님!
+)
 
 # 1. 실시간 시세 및 지수
 def get_realtime_data(stock_code=None):
@@ -35,12 +40,10 @@ def get_realtime_data(stock_code=None):
     except:
         return None
 
-# 2. 뉴스 가져오기 (2중 백업: 구글 + 연합뉴스)
+# 2. 뉴스 가져오기 (자동 동기화 로직 유지)
 def get_latest_news(stock_name):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     news_list = []
-    
-    # [1차 시도] 구글 뉴스
     try:
         url = f"https://www.google.com/search?q={stock_name}+주식+뉴스&tbm=nws&hl=ko"
         res = requests.get(url, headers=headers, timeout=5)
@@ -54,22 +57,9 @@ def get_latest_news(stock_name):
             news_list.append({"title": title, "link": link})
     except:
         pass
-
-    # [2차 시도] 뉴스핌 (백업)
-    if not news_list:
-        try:
-            url = f"https://www.newspim.com/search/?search_category=all&search_keyword={stock_name}"
-            res = requests.get(url, headers=headers, timeout=5)
-            soup = BeautifulSoup(res.text, 'html.parser')
-            items = soup.select('div.news_list > dl > dt > a')
-            for item in items[:5]:
-                news_list.append({"title": item.get_text().strip(), "link": "https://www.newspim.com" + item['href'] if item['href'].startswith('/') else item['href']})
-        except:
-            pass
-            
     return news_list
 
-# --- 사이드바 및 설정 ---
+# --- 사이드바 설정 (이제 기본으로 숨어있습니다) ---
 st.sidebar.title("💎 프리미엄 설정")
 market_data = get_realtime_data()
 if market_data:
@@ -86,7 +76,7 @@ hist_start = st.sidebar.date_input("조회 시작일", datetime.now() - timedelt
 hist_end = st.sidebar.date_input("조회 종료일", datetime.now())
 
 # --- 메인 화면 ---
-st.title("🚀 행님 전용 스마트 분석기 7.5.3")
+st.title("🚀 믿거나 말거나 스마트 분석기 7.5.4")
 search_name = st.text_input("🔍 분석할 종목명을 입력하세요", "")
 
 if search_name:
@@ -127,12 +117,10 @@ if search_name:
             fig.update_layout(template='plotly_dark', height=450, margin=dict(l=10, r=10, t=10, b=10))
             st.plotly_chart(fig, use_container_width=True)
 
-            # --- [레이아웃 유지] 뉴스 & 과거 기록 ---
+            # 뉴스 & 과거 기록
             col_left, col_right = st.columns(2)
-            
             with col_left:
                 st.subheader("📰 최신 주요 뉴스")
-                # [자동 동기화 핵심] 빈 컨테이너 먼저 생성
                 news_container = st.empty()
                 news_container.info("🔄 뉴스를 동기화하는 중입니다...")
             
@@ -141,15 +129,13 @@ if search_name:
                 df_hist = fdr.DataReader(stock_code, start=hist_start, end=hist_end)
                 st.dataframe(df_hist.sort_index(ascending=False), use_container_width=True)
 
-            # --- 뉴스 데이터 실시간 동기화 ---
+            # 뉴스 자동 업데이트
             news_data = get_latest_news(target_name)
             if news_data:
-                # 데이터가 준비되면 info 메시지를 지우고 리스트로 교체
                 with news_container.container():
                     for n in news_data:
                         st.markdown(f"✅ [{n['title']}]({n['link']})")
             else:
-                news_container.warning("⚠️ 뉴스를 찾을 수 없습니다. (포털 서버 확인 중)")
-
+                news_container.warning("⚠️ 뉴스를 찾을 수 없습니다.")
         else:
             st.error("종목을 찾을 수 없습니다.")
