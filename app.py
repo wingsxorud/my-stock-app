@@ -66,7 +66,7 @@ hist_start = st.sidebar.date_input("기록 조회 시작일", datetime.now() - t
 hist_end = st.sidebar.date_input("기록 조회 종료일", datetime.now())
 
 # --- 메인 화면 ---
-st.title("🚀 내 주식은 오를까??? 내릴까???")
+st.title("🚀 타짜 호구: 파도! 올라갔으면 내려 가고 내갔으면 다시 올라가는거야!")
 search_input = st.text_input("🔍 종목명 또는 코드를 입력하세요", "")
 
 if search_input:
