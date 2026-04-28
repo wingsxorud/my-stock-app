@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 
 # 1. 페이지 설정
-st.set_page_config(page_title="행님 전용 주식 분석기 7.7.5", page_icon="💎", layout="wide", initial_sidebar_state="auto")
+st.set_page_config(page_title="행님 전용 주식 분석기 7.7.6", page_icon="💎", layout="wide", initial_sidebar_state="auto")
 
 # [캐싱] 종목 리스트
 @st.cache_data(ttl=3600)
@@ -23,8 +23,8 @@ def get_stock_list():
 # 뉴스 감성 분석 엔진
 def analyze_news_sentiment(stock_name):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    pos_words = ['상승', '호재', '돌파', '수익', '긍정', '목표가 상향', '성장', '최고', '강세', '확대', '기대', '우상향']
-    neg_words = ['하락', '악재', '우려', '손실', '부정', '목표가 하향', '위기', '최저', '약세', '축소', '하락세', '조정']
+    pos_words = ['상승', '호재', '돌파', '수익', '긍정', '성장', '최고', '강세', '확대', '기대', '우상향']
+    neg_words = ['하락', '악재', '우려', '손실', '부정', '위기', '최저', '약세', '축소', '하락세', '조정']
     sentiment_score = 0
     news_data = []
     try:
@@ -51,7 +51,7 @@ hist_start = st.sidebar.date_input("기록 조회 시작일", datetime.now() - t
 hist_end = st.sidebar.date_input("기록 조회 종료일", datetime.now())
 
 # --- 메인 ---
-st.title("🚀 행님 전용 스마트 분석기 7.7.5")
+st.title("🚀 행님 전용 스마트 분석기 7.7.6")
 search_input = st.text_input("🔍 종목명 또는 코드(6자리) 입력", "")
 
 if search_input:
@@ -70,7 +70,7 @@ if search_input:
 
     if target_code:
         st.markdown("---")
-        with st.spinner(f'🚀 {target_name} 정밀 분석 중...'):
+        with st.spinner(f'🚀 {target_name} 데이터 분석 중...'):
             df = fdr.DataReader(target_code, start=train_start)
             if not df.empty:
                 df_p = df.reset_index()[['Date', 'Close']].rename(columns={'Date':'ds', 'Close':'y'})
@@ -86,41 +86,49 @@ if search_input:
                 today_forecast = forecast[forecast['ds'].dt.strftime('%Y-%m-%d') == today_str]
                 today_pred_val = int(today_forecast.iloc[0]['yhat']) if not today_forecast.empty else int(forecast[forecast['ds'] > df.index[-1]].iloc[0]['yhat'])
                 
-                # 뉴스 반영 최종 예측 (D-Day 기준)
+                # 뉴스 반영 최종 예측
                 final_target_val = int(forecast.iloc[-1]['yhat'] * (1 + news_weight))
                 
-                # --- 상단 구분형 지표 출력 ---
-                st.info(f"💡 [오늘의 흐름]은 파란색, [뉴스 반영 {forecast_days}일 후]는 분홍색으로 구분됩니다.")
+                # --- 상단 구분형 지표 출력 (강조 버전) ---
                 c1, c2, c3, c4 = st.columns(4)
                 
                 with c1:
-                    st.metric("💰 현재가", f"{last_val:,}원")
+                    st.metric("💰 현재 실시간가", f"{last_val:,}원")
                 
                 with c2:
-                    # '당일 종가'는 오늘 하루의 일기예보 같은 느낌
-                    st.metric("☀️ 당일 종가(예측)", f"{today_pred_val:,}원", delta=f"{today_pred_val - last_val:,}원", delta_color="normal")
+                    # [오늘의 흐름 - 파란색 강조]
+                    st.subheader("🟦 오늘의 흐름")
+                    st.metric("당일 종가(예측)", f"{today_pred_val:,}원", delta=f"{today_pred_val - last_val:,}원")
                 
                 with c3:
-                    # '뉴스 반영'은 좀 더 장기적인 목표가 느낌
+                    # [뉴스 반영 미래 - 분홍색 강조]
+                    st.subheader("🟥 뉴스 반영 미래")
                     sentiment_label = "긍정" if news_weight > 0 else "부정" if news_weight < 0 else "중립"
-                    st.metric(f"📰 뉴스반영 ({sentiment_label})", f"{final_target_val:,}원", delta=f"D-{forecast_days} 목표")
+                    st.metric(f"{forecast_days}일 후 ({sentiment_label})", f"{final_target_val:,}원", delta=f"뉴스영향 {news_weight*100:+.1f}%")
                 
                 with c4:
                     day_change_pct = ((today_pred_val - last_val) / last_val) * 100
                     st.metric("🎯 당일 예상 등락", f"{day_change_pct:+.2f}%")
 
-                # 그래프 및 하단 로직 (이전 버전 유지)
+                # 그래프 (예측선 색상 매칭)
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='실제 주가', line=dict(color='#00ff00', width=3)))
+                
                 pred_only = forecast[forecast['ds'] >= df.index[-1]]
+                # 오늘의 흐름선 (하늘색)
+                fig.add_trace(go.Scatter(x=pred_only['ds'][:2], y=pred_only['yhat'][:2], name='오늘의 흐름', line=dict(color='#00ffff', width=4)))
+                # 미래 예측선 (회색 점선)
                 fig.add_trace(go.Scatter(x=pred_only['ds'], y=pred_only['yhat'], name='AI 예측선', line=dict(color='#aaaaaa', width=2, dash='dash')))
-                fig.add_trace(go.Scatter(x=[pred_only['ds'].iloc[-1]], y=[final_target_val], name=f'D-{forecast_days} 목표가', mode='markers+text', text=[f"{forecast_days}일 후"], textposition="top center", marker=dict(color='#ff00ff', size=15, symbol='star', line=dict(color='white', width=1))))
+                # 최종 목표가 (분홍색 별)
+                fig.add_trace(go.Scatter(x=[pred_only['ds'].iloc[-1]], y=[final_target_val], name='뉴스 반영 목표', mode='markers+text', text=[f"{forecast_days}일 후"], textposition="top center", marker=dict(color='#ff00ff', size=15, symbol='star', line=dict(color='white', width=1))))
+                
                 fig.update_layout(template='plotly_dark', height=550, margin=dict(l=10, r=10, t=10, b=10), hovermode='x unified', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                 st.plotly_chart(fig, use_container_width=True)
 
+                # 하단 정보 (뉴스/기록 생략 - 동일함)
                 col_news, col_hist = st.columns(2)
                 with col_news:
-                    st.subheader(f"📰 {target_name} 뉴스")
+                    st.subheader(f"📰 {target_name} 주요 뉴스")
                     for n in news_list[:5]: st.markdown(f"✅ [{n['title']}]({n['link']})")
                 with col_hist:
                     st.subheader("📋 주가 기록")
