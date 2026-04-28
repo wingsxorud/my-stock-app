@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 
 # 1. 페이지 설정
-st.set_page_config(page_title="행님 전용 주식 분석기 7.7.0", page_icon="💎", layout="wide", initial_sidebar_state="auto")
+st.set_page_config(page_title="행님 전용 주식 분석기 7.7.1", page_icon="💎", layout="wide", initial_sidebar_state="auto")
 
 # [캐싱] 국내 종목 리스트
 @st.cache_data(ttl=3600)
@@ -37,11 +37,13 @@ def get_latest_news(stock_name):
 st.sidebar.title("💎 프리미엄 설정")
 train_start = st.sidebar.date_input("학습 시작일", datetime(2023, 1, 1))
 forecast_days = st.sidebar.slider("예측 기간", 1, 365, 30)
-hist_start = st.sidebar.date_input("기록 조회 시작일", datetime.now() - timedelta(days=30))
+
+# [수정] 기본값을 오늘로부터 7일 전으로 설정하여 '최근 일주일'만 보이게 함
+hist_start = st.sidebar.date_input("기록 조회 시작일", datetime.now() - timedelta(days=7))
 hist_end = st.sidebar.date_input("기록 조회 종료일", datetime.now())
 
 # --- 메인 ---
-st.title("🚀 행님 전용 스마트 분석기 7.7.0")
+st.title("🚀 행님 전용 스마트 분석기 7.7.1")
 search_input = st.text_input("🔍 종목명 또는 코드(6자리) 입력", "")
 
 if search_input:
@@ -89,31 +91,26 @@ if search_input:
                     for n in get_latest_news(target_name): st.markdown(f"✅ [{n['title']}]({n['link']})")
                 
                 with col_hist:
-                    st.subheader("📋 과거 주가 기록")
+                    st.subheader("📋 최근 주가 기록 (일주일)")
                     df_hist = fdr.DataReader(target_code, start=hist_start, end=hist_end)
                     if not df_hist.empty:
-                        # [절대 쉼표 로직] 데이터프레임 변환
                         df_hist_display = df_hist.copy().sort_index(ascending=False)
-                        
-                        # 1. 날짜 형식 깔끔하게
                         df_hist_display.index = df_hist_display.index.strftime('%Y-%m-%d')
                         
-                        # 2. 모든 숫자에 쉼표를 찍고 '문자열'로 강제 변환
+                        # 강제 쉼표 처리
                         for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
                             if col in df_hist_display.columns:
                                 df_hist_display[col] = df_hist_display[col].apply(lambda x: f"{int(x):,}")
                         
-                        # 3. 변동률만 소수점 유지
                         if 'Change' in df_hist_display.columns:
                             df_hist_display['Change'] = df_hist_display['Change'].apply(lambda x: f"{x:+.4f}")
 
-                        # 4. 컬럼명 한글화
                         df_hist_display = df_hist_display.rename(columns={
                             'Open': '시가', 'High': '고가', 'Low': '저가', 
                             'Close': '종가', 'Volume': '거래량', 'Change': '변동률'
                         })
                         
-                        # 출력 (데이터 타입을 문자열로 바꿨으므로 스트림릿이 함부로 못 건드림)
-                        st.table(df_hist_display) # 더 확실한 가독성을 위해 st.table 권장 (혹은 st.dataframe)
+                        # 기록이 적으므로 깔끔하게 st.table로 출력
+                        st.table(df_hist_display)
                         
-                    else: st.warning("해당 기간의 기록이 없습니다.")
+                    else: st.warning("최근 일주일간의 기록이 없습니다.")
