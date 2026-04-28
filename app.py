@@ -7,7 +7,6 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import pytz
-import re
 
 # 1. 페이지 설정
 st.set_page_config(page_title="재미로 보는 주식 분석기", page_icon="💎", layout="wide", initial_sidebar_state="auto")
@@ -23,58 +22,48 @@ def get_market_status():
     if market_open <= now <= market_close: return "현재가 (실시간)"
     return "종가 (장 마감)"
 
-# [무적 뉴스 엔진] 네이버/구글 2중 검색 로직
+# [무적 뉴스 엔진] RSS 피드를 활용하여 차단 우회
 def analyze_news_sentiment(stock_name):
-    # 2026년 최신 브라우저 정보로 업데이트
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36"}
+    # RSS 방식은 User-Agent 차단에 훨씬 자유롭습니다.
+    headers = {"User-Agent": "Mozilla/5.0"}
     pos_words = ['상승', '호재', '돌파', '수익', '긍정', '성장', '최고', '강세', '기대', '어닝서프라이즈', '계약']
     neg_words = ['하락', '악재', '우려', '손실', '부정', '위기', '최저', '약세', '조정', '어닝쇼크', '유상증자']
     
     sentiment_score, news_data = 0, []
     
-    # 전략 1: 네이버 뉴스 검색 (구글보다 크롤링에 관대함)
     try:
-        url = f"https://search.naver.com/search.naver?where=news&query={stock_name}"
-        res = requests.get(url, headers=headers, timeout=7)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        items = soup.select('ul.list_news > li.bx')
+        # 구글 뉴스 RSS URL (가장 차단 안 되는 공식 루트)
+        rss_url = f"https://news.google.com/rss/search?q={stock_name}+주식&hl=ko&gl=KR&ceid=KR:ko"
+        res = requests.get(rss_url, headers=headers, timeout=10)
+        soup = BeautifulSoup(res.content, features="xml") # RSS는 XML 형식을 씁니다.
         
+        items = soup.findAll('item')
         for i, item in enumerate(items[:6]):
-            title_tag = item.select_one('a.news_tit')
-            info_tags = item.select('span.info')
+            title = item.title.text
+            link = item.link.text
+            source = item.source.text if item.source else "뉴스"
+            # RSS 시간 형식 변환
+            raw_date = item.pubDate.text if item.pubDate else ""
+            time_ago = raw_date[:16] # 날짜만 깔끔하게 절삭
             
-            if title_tag:
-                title = title_tag.get_text()
-                link = title_tag['href']
-                source = item.select_one('a.info.press').get_text().replace('언론사 선정', '') if item.select_one('a.info.press') else "뉴스"
-                time_ago = info_tags[-1].get_text() if info_tags else "최근"
-                
-                # 가중치 계산
-                time_weight = max(0.5, 1.2 - (i * 0.1))
-                score = sum(1 for pw in pos_words if pw in title) - sum(1 for nw in neg_words if nw in title)
-                sentiment_score += (score * time_weight)
-                
-                news_data.append({"title": title, "link": link, "source": source, "time": time_ago})
-    except: pass
-
-    # 네이버가 실패했을 경우만 구글 시도 (백업)
-    if not news_data:
-        try:
-            url = f"https://www.google.com/search?q={stock_name}+주식+뉴스&tbm=nws"
-            res = requests.get(url, headers=headers, timeout=7)
-            soup = BeautifulSoup(res.text, 'html.parser')
-            # 2026년 구글 뉴스 범용 선택자
-            items = soup.find_all('div', {'role': 'heading'}) or soup.select('div.n0W69d')
-            for i, item in enumerate(items[:6]):
-                title = item.get_text()
-                link = item.find_parent('a')['href'] if item.find_parent('a') else "#"
-                news_data.append({"title": title, "link": link, "source": "Google", "time": "최근"})
-        except: pass
+            # 가중치 및 감성 분석
+            time_weight = max(0.5, 1.2 - (i * 0.1))
+            score = sum(1 for pw in pos_words if pw in title) - sum(1 for nw in neg_words if nw in title)
+            sentiment_score += (score * time_weight)
+            
+            news_data.append({
+                "title": title,
+                "link": link,
+                "source": source,
+                "time": time_ago
+            })
+    except Exception as e:
+        print(f"RSS News Error: {e}")
 
     final_weight = max(min(sentiment_score * 0.015, 0.05), -0.05)
     return final_weight, news_data
 
-# [나머지 로직 7.8.3과 동일]
+# [나머지 로직 7.8.4와 동일]
 @st.cache_data(ttl=3600)
 def get_stock_list():
     try:
@@ -125,7 +114,7 @@ if search_input:
                     c1, c2, c3, c4 = st.columns(4)
                     with c1: st.metric(f"💰 {market_label}", f"{actual_last_val:,}원")
                     with c2: st.metric("☀️ AI 당일 예상가", f"{today_pred_val:,}원", delta=f"실제대비 {actual_last_val - today_pred_val:,}원")
-                    with c3: st.metric(f"📰 뉴스반영 ({'긍정' if news_weight > 0 else '부정' if news_weight < 0 else '중립'})", f"{final_target_val:,}원", delta=f"D-{forecast_days} 가중치적용")
+                    with c3: st.metric(f"📰 뉴스반영 ({'긍정' if news_weight > 0 else '부정' if news_weight < 0 else '중립'})", f"{final_target_val:,}원", delta=f"RSS 최신가중치 적용")
                     with c4:
                         diff_pct = ((actual_last_val - today_pred_val) / today_pred_val) * 100
                         st.metric(f"🎯 시장 평가 ({'과열' if diff_pct > 0 else '침체'})", f"{diff_pct:+.2f}%")
@@ -145,7 +134,7 @@ if search_input:
                             for n in news_list:
                                 st.markdown(f"**[{n['source']}]** {n['time']}\n\n✅ [{n['title']}]({n['link']})")
                                 st.markdown("---")
-                        else: st.warning("⚠️ 실시간 뉴스를 불러오는 데 실패했습니다. 잠시 후 다시 시도해 주세요.")
+                        else: st.warning("⚠️ 뉴스를 불러오는 데 실패했습니다. 잠시 후 다시 시도해 주세요.")
                     with col_hist:
                         st.subheader("📋 주가 기록")
                         df_hist = fdr.DataReader(target_code, start=hist_start, end=hist_end)
