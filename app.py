@@ -71,7 +71,7 @@ forecast_days = st.sidebar.slider("미래 예측 기간 (일)", 1, 365, 30)
 hist_start = st.sidebar.date_input("기록 조회 시작일", datetime.now() - timedelta(days=7))
 hist_end = st.sidebar.date_input("기록 조회 종료일", datetime.now())
 
-st.title("🚀 재미로 보는 주식 분석기")
+st.title("🚀 재미로 보는 주식 분석기 by ktg")
 search_input = st.text_input("🔍 종목명 또는 코드(6자리) 입력", "")
 
 if search_input:
