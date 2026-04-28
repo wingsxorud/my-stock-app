@@ -1,0 +1,7 @@
+streamlit
+pandas
+finance-datareader
+prophet
+matplotlib
+requests
+beautifulsoup4
