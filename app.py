@@ -103,4 +103,30 @@ if search_name:
                 x=pd.concat([forecast['ds'], forecast['ds'][::-1]]),
                 y=pd.concat([forecast['yhat_upper'], forecast['yhat_lower'][::-1]]),
                 fill='toself',
-                fillcolor='rgba(255
+                fillcolor='rgba(255, 0, 255, 0.1)',
+                line=dict(color='rgba(255,255,255,0)'),
+                hoverinfo="skip",
+                showlegend=False,
+                name='신뢰 구간'
+            ))
+
+            fig.update_layout(
+                template='plotly_dark',
+                hovermode='x unified',
+                margin=dict(l=20, r=20, t=20, b=20),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            # 과거 데이터 및 뉴스
+            with st.expander("📋 과거 주가 기록 확인하기"):
+                st.dataframe(df.sort_index(ascending=False), use_container_width=True)
+            
+            st.markdown("---")
+            st.subheader("📰 최신 주요 뉴스")
+            news_items = get_latest_news(target_name)
+            if news_items:
+                for n in news_items:
+                    st.write(f"🔗 [{n['title']}]({n['link']})")
+        else:
+            st.error("종목을 찾을 수 없습니다.")
