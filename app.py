@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 
 # 1. 페이지 설정
-st.set_page_config(page_title="행님 전용 주식 분석기 7.7.1", page_icon="💎", layout="wide", initial_sidebar_state="auto")
+st.set_page_config(page_title="그냥 주식 분석기 7.7.1", page_icon="💎", layout="wide", initial_sidebar_state="auto")
 
 # [캐싱] 국내 종목 리스트
 @st.cache_data(ttl=3600)
@@ -43,7 +43,7 @@ hist_start = st.sidebar.date_input("기록 조회 시작일", datetime.now() - t
 hist_end = st.sidebar.date_input("기록 조회 종료일", datetime.now())
 
 # --- 메인 ---
-st.title("🚀 행님 전용 스마트 분석기 7.7.1")
+st.title("🚀 그냥 주식 분석기 7.7.1")
 search_input = st.text_input("🔍 종목명 또는 코드(6자리) 입력", "")
 
 if search_input:
