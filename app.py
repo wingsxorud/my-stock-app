@@ -90,7 +90,7 @@ def get_large_pool():
     except: return []
 
 # --- 메인 화면 ---
-st.title("🚀 주식 분석기 v8.2.7 (인피니티 200 스캐너)")
+st.title("🚀 이거 어때? 주식 분석기")
 
 l_col, r_col = st.columns([1, 2.5])
 
