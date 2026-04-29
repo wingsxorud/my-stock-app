@@ -10,13 +10,13 @@ from concurrent.futures import ThreadPoolExecutor
 import math
 
 # 1. 페이지 설정
-st.set_page_config(page_title="주식 분석기 v8.2.3", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="주식 분석기 v8.2.4", page_icon="🚀", layout="wide")
 
 # [세션 상태 초기화]
 if 'recs' not in st.session_state: st.session_state.recs = None
 if 'analysis_result' not in st.session_state: st.session_state.analysis_result = None
 
-# [CSS 스타일] v8.2.2의 모바일 최적화 및 뉴스 날짜 스타일 유지
+# [CSS 스타일] 반응형 UI 유지
 st.markdown("""
     <style>
     @media (max-width: 640px) {
@@ -37,7 +37,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# [함수] 호가 단위 및 뉴스 분석 로직 유지
+# [함수 로직]
 def get_tick_size(price):
     if price < 2000: return 1
     elif price < 5000: return 5
@@ -58,7 +58,7 @@ def analyze_news_sentiment(stock_name):
     sentiment_score, news_data = 0, []
     try:
         rss_url = f"https://news.google.com/rss/search?q={stock_name}+주식&hl=ko&gl=KR&ceid=KR:ko"
-        res = requests.get(rss_url, headers=headers, timeout=5)
+        res = requests.get(rss_url, headers=headers, timeout=7)
         soup = BeautifulSoup(res.content, features="xml")
         items = soup.findAll('item')[:15]
         temp_list = []
@@ -81,51 +81,52 @@ def single_stock_worker(stock_info):
     code, name = stock_info
     try:
         weight, _ = analyze_news_sentiment(name)
-        df = fdr.DataReader(code, start=(datetime.now() - timedelta(days=10)).strftime('%Y-%m-%d'))
+        df = fdr.DataReader(code, start=(datetime.now() - timedelta(days=12)).strftime('%Y-%m-%d'))
         curr_p = int(df['Close'].iloc[-1])
         df_long = fdr.DataReader(code, start=(datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d'))
         base_p = df_long['Close'].rolling(window=20).mean().iloc[-1]
         target_p = round_to_tick(base_p * (1 + (weight * 3.5)))
         upside = ((target_p - curr_p) / curr_p) * 100
-        if upside > 0.1:
-            return {'name': name, 'code': code, 'curr': curr_p, 'target': target_p, 'upside': upside}
+        # [수정] 필터링 문턱을 없애고 무조건 데이터를 반환하도록 변경
+        return {'name': name, 'code': code, 'curr': curr_p, 'target': target_p, 'upside': upside}
     except: return None
 
-# [신규] 실시간 상위 200개 종목 리스트 획득 함수
 @st.cache_data(ttl=3600)
 def get_dynamic_stock_pool():
     try:
-        # 코스피/코스닥 상위 100개씩 총 200개 추출
         df_kospi = fdr.StockListing('KOSPI').sort_values('MarCap', ascending=False).head(100)
         df_kosdaq = fdr.StockListing('KOSDAQ').sort_values('MarCap', ascending=False).head(100)
         df_total = pd.concat([df_kospi, df_kosdaq])
         return df_total[['Code', 'Name']].values.tolist()
     except:
-        return [('005930', '삼성전자')] # 실패 시 기본값
+        return [('005930', '삼성전자')]
 
 # --- 메인 레이아웃 ---
-st.title("🚀 주식 분석기 v8.2.3 (광대역 스캐너)")
+st.title("🚀 주식 분석기 v8.2.4")
 
 l_col, r_col = st.columns([1, 2.5])
 
 with l_col:
     st.markdown('<div class="section-header">📡 실시간 200대 종목 레이더</div>', unsafe_allow_html=True)
     if st.button("🔄 레이더 광역 가동"):
-        with st.spinner("KOSPI/KOSDAQ 상위 200개 분석 중..."):
-            pool = get_dynamic_stock_pool() # 이제 강제 30개가 아니라 실시간 200개입니다!
-            with ThreadPoolExecutor(max_workers=15) as executor: # 스레드 살짝 증설
-                scanned = list(executor.map(single_stock_worker, pool))
-            st.session_state.recs = sorted([r for r in scanned if r is not None], key=lambda x: x['upside'], reverse=True)[:5]
+        with st.spinner("KOSPI/KOSDAQ 상위 200개 정밀 스캔 중..."):
+            pool = get_dynamic_stock_pool()
+            with ThreadPoolExecutor(max_workers=12) as executor: 
+                results = list(executor.map(single_stock_worker, pool))
+            
+            # [수정] None이 아닌 결과 중 upside 순으로 정렬하여 상위 5개를 세션에 저장
+            valid_results = [r for r in results if r is not None]
+            st.session_state.recs = sorted(valid_results, key=lambda x: x['upside'], reverse=True)[:5]
     
     if st.session_state.recs:
         for r in st.session_state.recs:
-            st.markdown(f"""<div class="scan-card"><b>{r['name']}</b> <span style="color:#28a745;">+{r['upside']:.2f}%</span><br>현재: {r['curr']:,} / 예상: {r['target']:,}</div>""", unsafe_allow_html=True)
+            color = "#28a745" if r['upside'] > 0 else "#007bff"
+            st.markdown(f"""<div class="scan-card"><b>{r['name']}</b> <span style="color:{color};">{r['upside']:+.2f}%</span><br>현재: {r['curr']:,} / 예상: {r['target']:,}</div>""", unsafe_allow_html=True)
 
 with r_col:
     st.markdown('<div class="section-header">🔍 종목 정밀 분석</div>', unsafe_allow_html=True)
     search_input = st.text_input("분석할 종목명을 입력하세요", value="", placeholder="예: 삼성전자, SK하이닉스")
     
-    # 정밀 분석 로직 (v8.2.2와 동일)
     if search_input:
         stocks = fdr.StockListing('KRX')[['Code', 'Name']].drop_duplicates(subset=['Code'])
         matched = stocks[stocks['Name'].str.contains(search_input, case=False) | stocks['Code'].str.contains(search_input)]
@@ -165,7 +166,6 @@ with r_col:
         </div>
         """, unsafe_allow_html=True)
         
-        st.write(f"### 📈 {res['name']} 주가 예측")
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=res['df'].index, y=res['df']['Close'], name='실제 주가', line=dict(color='#00ff00')))
         fig.add_trace(go.Scatter(x=res['forecast']['ds'], y=res['forecast']['yhat']*(1+res['weight']), name='AI 예측', line=dict(color='#ff00ff', dash='dash')))
