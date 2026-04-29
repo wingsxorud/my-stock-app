@@ -109,7 +109,7 @@ left_col, right_col = st.columns([1, 2])
 # [왼쪽: 스캐너]
 with left_col:
     st.markdown('<div class="section-header">📡 오늘의 TOP 5 추천</div>', unsafe_allow_html=True)
-    if st.button("🔄 레이더 재가동"):
+    if st.button("🔄 레이더 가동"):
         with st.spinner("최신 시세 반영 중..."):
             pool = get_stock_pool_30()
             with ThreadPoolExecutor(max_workers=10) as executor:
