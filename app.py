@@ -10,13 +10,12 @@ import pytz
 from concurrent.futures import ThreadPoolExecutor
 
 # 1. 페이지 설정
-st.set_page_config(page_title="재미로 보는 주식 분석기 v8.0.0", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="재미로 보는 주식 분석기 v8.0.1", page_icon="🚀", layout="wide")
 
-# [CSS 스타일] 대시보드 및 가독성 최적화
+# [CSS 스타일]
 st.markdown("""
     <style>
     .main { background-color: #0e1117; }
-    /* 스캐너 카드 디자인 (밝은 테마) */
     .scan-card {
         background-color: #ffffff;
         padding: 15px;
@@ -26,7 +25,6 @@ st.markdown("""
         margin-bottom: 12px;
         color: #1a1c24;
     }
-    /* 구분선 및 타이틀 스타일 */
     .section-title {
         color: #ffffff;
         font-size: 1.5rem;
@@ -51,9 +49,7 @@ def analyze_news_sentiment(stock_name):
         items = soup.findAll('item')[:8]
         for i, item in enumerate(items):
             title = item.title.text
-            pub_date = item.pubDate.text if item.pubDate else ""
-            try: dt_obj = datetime.strptime(pub_date, '%a, %d %b %Y %H:%M:%S %Z')
-            except: dt_obj = datetime.now()
+            dt_obj = datetime.strptime(item.pubDate.text, '%a, %d %b %Y %H:%M:%S %Z') if item.pubDate else datetime.now()
             score = sum(1 for pw in pos_words if pw in title) - sum(1 for nw in neg_words if nw in title)
             sentiment_score += (score * (1.1 - (i * 0.1)))
             if i < 5: news_data.append({"title": title, "link": item.link.text, "source": item.source.text, "dt": dt_obj})
@@ -95,12 +91,12 @@ def run_scanner():
 
 @st.cache_data(ttl=3600)
 def get_stock_list():
-    return fdr.StockListing('KRX')[['Code', 'Name']].drop_duplicates(subset=['Code'])
+    try: return fdr.StockListing('KRX')[['Code', 'Name']].drop_duplicates(subset=['Code'])
+    except: return pd.DataFrame([{'Code': '005930', 'Name': '삼성전자'}])
 
 # --- 메인 대시보드 화면 ---
-st.title("🚀 주식 분석기 v8.0.0 (통합 대시보드)")
+st.title("🚀 주식 분석기 v8.0.1 (대시보드 완성판)")
 
-# 화면 분할 (1:2 비율)
 left_col, right_col = st.columns([1, 2])
 
 # [왼쪽 섹션: 스캐너]
@@ -109,7 +105,7 @@ with left_col:
     if st.button("🔄 레이더 새로고침"):
         st.cache_data.clear()
     
-    with st.spinner("30개 우량주 병렬 스캐닝 중..."):
+    with st.spinner("30개 우량주 병렬 분석 중..."):
         recs = run_scanner()
         for r in recs:
             st.markdown(f"""
@@ -136,37 +132,41 @@ with right_col:
         matched = total_list[total_list['Name'].str.contains(search_input, case=False) | total_list['Code'].str.contains(search_input)]
         
         if not matched.empty:
-            target_code = matched.iloc[0]['Code']
-            target_name = matched.iloc[0]['Name']
-            
-            with st.spinner(f'🚀 {target_name} 정밀 리포트 생성 중...'):
-                df = fdr.DataReader(target_code, start="2023-01-01")
-                df_p = df.reset_index()[['Date', 'Close']].rename(columns={'Date':'ds', 'Close':'y'})
-                m = Prophet(daily_seasonality=True).fit(df_p)
-                forecast = m.predict(m.make_future_dataframe(periods=30))
-                weight, news_list = analyze_news_sentiment(target_name)
-                
-                curr_p = int(df['Close'].iloc[-1])
-                target_p = int(forecast.iloc[-1]['yhat'] * (1 + weight))
-                upside_pct = ((target_p - curr_p) / curr_p) * 100
-                
-                m1, m2, m3 = st.columns(3)
-                m1.metric("💰 현재가", f"{curr_p:,}원")
-                m2.metric("🎯 뉴스반영 목표가", f"{target_p:,}원")
-                m3.metric("📈 예상 상승폭", f"{upside_pct:+.2f}%")
-                
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='실제', line=dict(color='#00ff00', width=2)))
-                fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat']*(1+weight), name='AI 예측', line=dict(color='#ff00ff', dash='dash')))
-                fig.update_layout(template='plotly_dark', height=400, margin=dict(l=0,r=0,t=0,b=0))
-                st.plotly_chart(fig, use_container_width=True)
-                
-                st.subheader(f"📰 {target_name} 최신 뉴스 분석")
-                for n in news_list:
-                    st.markdown(f"""
-                    <div style="background-color:#262730; padding:8px 12px; border-radius:8px; border-left:4px solid #ff00ff; margin-bottom:6px; border:1px solid #3e3e3e;">
-                        <span style="color:#00ffff; font-size:0.75rem;">[{n['source']}]</span> 
-                        <span style="color:#888; font-size:0.75rem;">| {n['dt'].strftime('%Y-%m-%d %H:%M')}</span><br>
-                        <a href="{n['link']}" target="_blank" style="text-decoration:none; color:white; font-size:0.95rem;">✅ {n['title']}</a>
-                    </div>
-                    """, unsafe_allow_html=True)
+            # [복구된 선택 로직] 결과가 여러 개일 때 선택 박스 표시
+            if len(matched) > 1:
+                sel = st.selectbox("🎯 정확한 종목을 선택하세요", ["--- 선택하세요 ---"] + [f"{row['Name']} ({row['Code']})" for _, row in matched.iterrows()])
+                if sel != "--- 선택하세요 ---":
+                    target_code = sel.split('(')[1].replace(')', '')
+                    target_name = sel.split(' (')[0]
+                else: target_code = ""
+            else:
+                target_code = matched.iloc[0]['Code']
+                target_name = matched.iloc[0]['Name']
+
+            if target_code:
+                with st.spinner(f'🚀 {target_name} 데이터 분석 중...'):
+                    df = fdr.DataReader(target_code, start="2023-01-01")
+                    df_p = df.reset_index()[['Date', 'Close']].rename(columns={'Date':'ds', 'Close':'y'})
+                    m = Prophet(daily_seasonality=True).fit(df_p)
+                    forecast = m.predict(m.make_future_dataframe(periods=30))
+                    weight, news_list = analyze_news_sentiment(target_name)
+                    
+                    curr_p = int(df['Close'].iloc[-1]); target_p = int(forecast.iloc[-1]['yhat'] * (1 + weight))
+                    upside_pct = ((target_p - curr_p) / curr_p) * 100
+                    
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("💰 현재가", f"{curr_p:,}원"); m2.metric("🎯 목표가", f"{target_p:,}원"); m3.metric("📈 예상 상승폭", f"{upside_pct:+.2f}%")
+                    
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='실제', line=dict(color='#00ff00', width=2)))
+                    fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat']*(1+weight), name='AI 예측', line=dict(color='#ff00ff', dash='dash')))
+                    fig.update_layout(template='plotly_dark', height=400, margin=dict(l=0,r=0,t=0,b=0)); st.plotly_chart(fig, use_container_width=True)
+                    
+                    st.subheader(f"📰 {target_name} 최신 뉴스")
+                    for n in news_list:
+                        st.markdown(f"""
+                        <div style="background-color:#262730; padding:8px 12px; border-radius:8px; border-left:4px solid #ff00ff; margin-bottom:6px; border:1px solid #3e3e3e;">
+                            <span style="color:#00ffff; font-size:0.75rem;">[{n['source']}]</span> | <span style="color:#888; font-size:0.75rem;">{n['dt'].strftime('%Y-%m-%d %H:%M')}</span><br>
+                            <a href="{n['link']}" target="_blank" style="text-decoration:none; color:white; font-size:0.95rem;">✅ {n['title']}</a>
+                        </div>
+                        """, unsafe_allow_html=True)
