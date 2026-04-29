@@ -8,19 +8,19 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 import math
-import time # [추가] 속도 조절용
+import time
 
 # 1. 페이지 설정
-st.set_page_config(page_title="주식 분석기 v8.2.5", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="주식 분석기 v8.2.7", page_icon="🚀", layout="wide")
 
 if 'recs' not in st.session_state: st.session_state.recs = None
 if 'analysis_result' not in st.session_state: st.session_state.analysis_result = None
 
-# [CSS 스타일]
+# [CSS 스타일] 반응형 및 모바일 최적화 유지
 st.markdown("""
     <style>
     @media (max-width: 640px) {
-        .metric-container { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 10px !important; }
+        .metric-container { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
         .metric-value { font-size: 1.1rem !important; }
     }
     .main { background-color: #0e1117; }
@@ -35,7 +35,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# [함수] 호가 단위
+# [함수] 호가 단위 보정
 def round_to_tick(price):
     if price < 2000: tick = 1
     elif price < 5000: tick = 5
@@ -46,77 +46,81 @@ def round_to_tick(price):
     else: tick = 1000
     return int(math.floor(price / tick + 0.5) * tick)
 
-# [함수] 뉴스 분석 (안정성 강화)
+# [함수] 뉴스 분석 (고속/안정성 특화)
 def analyze_news_sentiment(stock_name):
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    headers = {"User-Agent": "Mozilla/5.0"}
     pos_words = ['상승', '호재', '돌파', '수익', '긍정', '성장', '최고', '강세', '기대', '계약', '신고가', '수주']
     neg_words = ['하락', '악재', '우려', '손실', '부정', '위기', '최저', '약세', '조정', '유상증자']
     sentiment_score, news_data = 0, []
     try:
-        # [수정] 서버 부하를 줄이기 위해 아주 짧은 대기 추가
-        time.sleep(0.05)
         rss_url = f"https://news.google.com/rss/search?q={stock_name}+주식&hl=ko&gl=KR&ceid=KR:ko"
-        res = requests.get(rss_url, headers=headers, timeout=8)
+        res = requests.get(rss_url, headers=headers, timeout=2.5)
         soup = BeautifulSoup(res.content, features="xml")
-        items = soup.findAll('item')[:10]
+        items = soup.findAll('item')[:5]
         for i, item in enumerate(items):
             title = item.title.text
             score = sum(1 for pw in pos_words if pw in title) - sum(1 for nw in neg_words if nw in title)
             sentiment_score += (score * (1.1 - (i * 0.1)))
-            if i < 5:
-                dt = item.pubDate.text if item.pubDate else ""
-                news_data.append({"title": title, "link": item.link.text, "source": item.source.text, "dt": dt})
-    except: pass # 뉴스를 못 가져와도 에러 없이 0점 반환
+            news_data.append({"title": title, "link": item.link.text, "source": item.source.text, "dt": item.pubDate.text})
+    except: pass
     return max(min(sentiment_score * 0.015, 0.05), -0.05), news_data
 
-# [함수] 개별 종목 분석 워커 (고안정성)
+# [함수] 스캐너 워커
 def single_stock_worker(stock_info):
     code, name = stock_info
     try:
         weight, _ = analyze_news_sentiment(name)
-        # 시세 데이터 로드
         df = fdr.DataReader(code, start=(datetime.now() - timedelta(days=15)).strftime('%Y-%m-%d'))
         if df.empty: return None
         curr_p = int(df['Close'].iloc[-1])
-        
-        # 20일 이동평균선 대용 분석
         df_long = fdr.DataReader(code, start=(datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d'))
         base_p = df_long['Close'].rolling(window=20).mean().iloc[-1]
-        
         target_p = round_to_tick(base_p * (1 + (weight * 3.5)))
         upside = ((target_p - curr_p) / curr_p) * 100
         return {'name': name, 'code': code, 'curr': curr_p, 'target': target_p, 'upside': upside}
     except: return None
 
 @st.cache_data(ttl=3600)
-def get_dynamic_stock_pool():
+def get_large_pool():
+    """시총 상위 200개를 가져옵니다."""
     try:
-        # 코스피 100개 + 코스닥 100개
-        df_kospi = fdr.StockListing('KOSPI').sort_values('MarCap', ascending=False).head(100)
-        df_kosdaq = fdr.StockListing('KOSDAQ').sort_values('MarCap', ascending=False).head(100)
-        return pd.concat([df_kospi, df_kosdaq])[['Code', 'Name']].values.tolist()
+        df_k = fdr.StockListing('KOSPI').head(100)
+        df_q = fdr.StockListing('KOSDAQ').head(100)
+        return pd.concat([df_k, df_q])[['Code', 'Name']].values.tolist()
     except: return []
 
-# --- 레이아웃 ---
-st.title("🚀 주식 분석기 v8.2.5 (고안정성 스캐너)")
+# --- 메인 화면 ---
+st.title("🚀 주식 분석기 v8.2.7 (인피니티 200 스캐너)")
 
 l_col, r_col = st.columns([1, 2.5])
 
 with l_col:
-    st.markdown('<div class="section-header">📡 실시간 200대 종목 레이더</div>', unsafe_allow_html=True)
-    if st.button("🔄 레이더 광역 가동"):
-        with st.spinner("서버 차단을 피해 조심스럽게 스캔 중... (약 15초 소요)"):
-            pool = get_dynamic_stock_pool()
-            # [수정] 스레드 수를 8개로 줄여 안정성 극대화
-            with ThreadPoolExecutor(max_workers=8) as executor:
-                results = list(executor.map(single_stock_worker, pool))
+    st.markdown('<div class="section-header">📡 전 종목 광역 레이더</div>', unsafe_allow_html=True)
+    if st.button("🔄 200대 종목 풀 스캔"):
+        progress_text = st.empty()
+        bar = st.progress(0)
+        
+        pool = get_large_pool()
+        all_results = []
+        # [핵심] 20개씩 청크로 나누어 분석하여 안정성 확보
+        chunk_size = 20
+        chunks = [pool[i:i + chunk_size] for i in range(0, len(pool), chunk_size)]
+        
+        for idx, chunk in enumerate(chunks):
+            progress_text.text(f"분석 중: {idx*chunk_size}/{len(pool)} 완료...")
+            bar.progress((idx + 1) / len(chunks))
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                batch_results = list(executor.map(single_stock_worker, chunk))
+            all_results.extend([r for r in batch_results if r is not None])
+            time.sleep(0.5) # 서버 휴식 시간
             
-            valid_results = [r for r in results if r is not None]
-            st.session_state.recs = sorted(valid_results, key=lambda x: x['upside'], reverse=True)[:5]
-    
+        st.session_state.recs = sorted(all_results, key=lambda x: x['upside'], reverse=True)[:5]
+        progress_text.text("✅ 분석 완료!")
+        bar.empty()
+
     if st.session_state.recs:
         for r in st.session_state.recs:
-            st.markdown(f"""<div class="scan-card"><b>{r['name']}</b> <span style="color:#28a745;">{r['upside']:+.2f}%</span><br>현재: {r['curr']:,} / 목표: {r['target']:,}</div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="scan-card"><b>{r['name']}</b> <span style="color:#28a745;">{r['upside']:+.2f}%</span><br>현재: {r['curr']:,} / 예상: {r['target']:,}</div>""", unsafe_allow_html=True)
 
 with r_col:
     st.markdown('<div class="section-header">🔍 종목 정밀 분석</div>', unsafe_allow_html=True)
@@ -167,6 +171,4 @@ with r_col:
         
         st.subheader("📰 최신 뉴스")
         for n in res['news']:
-            try: dt_obj = datetime.strptime(n['dt'], '%a, %d %b %Y %H:%M:%S %Z'); dt_fmt = dt_obj.strftime('%m-%d %H:%M')
-            except: dt_fmt = n['dt']
-            st.markdown(f"""<div class="news-box"><span style="color:#888; font-size:0.75rem;">{dt_fmt} | {n['source']}</span><br><a href="{n['link']}" target="_blank" style="text-decoration:none; color:white; font-size:0.95rem; font-weight:bold;">✅ {n['title']}</a></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="news-box"><span style="color:#888; font-size:0.75rem;">{n['dt']} | {n['source']}</span><br><a href="{n['link']}" target="_blank" style="text-decoration:none; color:white; font-size:0.95rem; font-weight:bold;">✅ {n['title']}</a></div>""", unsafe_allow_html=True)
