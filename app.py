@@ -11,12 +11,12 @@ import math
 import time
 
 # 1. 페이지 설정
-st.set_page_config(page_title="주식 분석기 v8.2.7-B", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="주식 분석기 v8.2.7-C", page_icon="🚀", layout="wide")
 
 if 'recs' not in st.session_state: st.session_state.recs = None
 if 'analysis_result' not in st.session_state: st.session_state.analysis_result = None
 
-# [CSS 스타일] 반응형 및 모바일 최적화 유지
+# [CSS 스타일] 행님 요청 모바일 반응형 디자인 유지
 st.markdown("""
     <style>
     @media (max-width: 640px) {
@@ -62,30 +62,28 @@ def analyze_news_sentiment(stock_name):
         for item in items:
             title = item.title.text
             pub_date = item.pubDate.text if item.pubDate else ""
-            try:
-                # 구글 뉴스 표준 날짜 형식 파싱
-                dt_obj = datetime.strptime(pub_date, '%a, %d %b %Y %H:%M:%S %Z')
-            except:
-                dt_obj = datetime.now()
-                
+            try: dt_obj = datetime.strptime(pub_date, '%a, %d %b %Y %H:%M:%S %Z')
+            except: dt_obj = datetime.now()
             score = sum(1 for pw in pos_words if pw in title) - sum(1 for nw in neg_words if nw in title)
-            temp_list.append({
-                "title": title, 
-                "link": item.link.text, 
-                "source": item.source.text if item.source else "뉴스", 
-                "dt": dt_obj,
-                "score": score
-            })
+            temp_list.append({"title": title, "link": item.link.text, "source": item.source.text, "dt": dt_obj, "score": score})
         
-        # [핵심] 발행 시간 기준 내림차순(최신순) 정렬
         temp_list.sort(key=lambda x: x['dt'], reverse=True)
-        
         final_news = temp_list[:5]
         for i, n in enumerate(final_news):
             sentiment_score += (n['score'] * (1.1 - (i * 0.1)))
             news_data.append(n)
     except: pass
     return max(min(sentiment_score * 0.015, 0.05), -0.05), news_data
+
+# [신규] 안전한 종목 리스트 획득 (검색 기능 복구)
+@st.cache_data(ttl=3600)
+def get_safe_stock_list():
+    try:
+        df_k = fdr.StockListing('KOSPI')
+        df_q = fdr.StockListing('KOSDAQ')
+        return pd.concat([df_k, df_q])[['Code', 'Name']].drop_duplicates(subset=['Code'])
+    except:
+        return pd.DataFrame([('005930', '삼성전자'), ('000660', 'SK하이닉스')], columns=['Code', 'Name'])
 
 # [함수] 스캐너 워커
 def single_stock_worker(stock_info):
@@ -102,18 +100,6 @@ def single_stock_worker(stock_info):
         return {'name': name, 'code': code, 'curr': curr_p, 'target': target_p, 'upside': upside}
     except: return None
 
-# [신규] 안전한 종목 리스트 획득 (검색 기능 복구의 핵심)
-@st.cache_data(ttl=3600)
-def get_safe_stock_list():
-    try:
-        # KRX 전체 대신 KOSPI/KOSDAQ을 개별 호출하여 안정성 확보
-        df_k = fdr.StockListing('KOSPI')
-        df_q = fdr.StockListing('KOSDAQ')
-        return pd.concat([df_k, df_q])[['Code', 'Name']].drop_duplicates(subset=['Code'])
-    except:
-        # 실패 시 비상용 리스트
-        return pd.DataFrame([('005930', '삼성전자'), ('000660', 'SK하이닉스')], columns=['Code', 'Name'])
-
 # --- 메인 화면 ---
 st.title("🚀 이거 어때? 살까? 말까? 분석기")
 
@@ -124,15 +110,12 @@ with l_col:
     if st.button("🔄 200대 종목 풀 스캔"):
         progress_text = st.empty()
         bar = st.progress(0)
-        
-        # 시총 상위 200개 추출 로직
         pool_df = get_safe_stock_list()
         pool = pool_df.head(200).values.tolist()
         
         all_results = []
         chunk_size = 20
         chunks = [pool[i:i + chunk_size] for i in range(0, len(pool), chunk_size)]
-        
         for idx, chunk in enumerate(chunks):
             progress_text.text(f"분석 중: {idx*chunk_size}/{len(pool)} 완료...")
             bar.progress((idx + 1) / len(chunks))
@@ -151,35 +134,37 @@ with l_col:
 
 with r_col:
     st.markdown('<div class="section-header">🔍 종목 정밀 분석</div>', unsafe_allow_html=True)
+    # [수정] 검색 안내 문구와 셀렉트 박스 로직 복구
     search_input = st.text_input("분석할 종목명을 입력하세요", placeholder="예: 삼성전자, SK하이닉스")
     
     if search_input:
-        stocks_df = get_safe_stock_list() # 안정화된 리스트 호출
+        stocks_df = get_safe_stock_list()
         matched = stocks_df[stocks_df['Name'].str.contains(search_input, case=False) | stocks_df['Code'].str.contains(search_input)]
         
         if not matched.empty:
-            if len(matched) > 1:
-                sel = st.selectbox("🎯 종목 선택", ["--- 선택 ---"] + [f"{row['Name']} ({row['Code']})" for _, row in matched.iterrows()])
-                target_code = sel.split('(')[1].replace(')', '') if sel != "--- 선택 ---" else ""
-                target_name = sel.split(' (')[0] if sel != "--- 선택 ---" else ""
-            else: target_code = matched.iloc[0]['Code']; target_name = matched.iloc[0]['Name']
+            # 여기서 셀렉트 박스가 나타납니다!
+            sel = st.selectbox("🎯 분석할 종목을 선택하세요", ["--- 선택 ---"] + [f"{row['Name']} ({row['Code']})" for _, row in matched.iterrows()])
+            
+            if sel != "--- 선택 ---":
+                target_code = sel.split('(')[1].replace(')', '')
+                target_name = sel.split(' (')[0]
 
-            if target_code and st.button(f"🚀 {target_name} 분석 시작"):
-                with st.spinner('정밀 리포트 생성 중...'):
-                    df = fdr.DataReader(target_code, start="2023-01-01")
-                    df_p = df.reset_index()[['Date', 'Close']].rename(columns={'Date':'ds', 'Close':'y'})
-                    m = Prophet(daily_seasonality=True).fit(df_p)
-                    forecast_all = m.predict(m.make_future_dataframe(periods=30))
-                    weight, news_list = analyze_news_sentiment(target_name)
-                    
-                    curr_p = int(df['Close'].iloc[-1])
-                    ai_daily_raw = int(forecast_all[forecast_all['ds'] <= datetime.now()].iloc[-1]['yhat'])
-                    st.session_state.analysis_result = {
-                        "name": target_name, "curr": curr_p, "ai_daily": round_to_tick(ai_daily_raw),
-                        "news_reflect": round_to_tick(int(ai_daily_raw * (1 + weight))),
-                        "market_eval": ((curr_p - ai_daily_raw) / ai_daily_raw) * 100,
-                        "news": news_list, "weight": weight, "df": df, "forecast": forecast_all
-                    }
+                if st.button(f"🚀 {target_name} 정밀 분석 시작"):
+                    with st.spinner('리포트 생성 중...'):
+                        df = fdr.DataReader(target_code, start="2023-01-01")
+                        df_p = df.reset_index()[['Date', 'Close']].rename(columns={'Date':'ds', 'Close':'y'})
+                        m = Prophet(daily_seasonality=True).fit(df_p)
+                        forecast_all = m.predict(m.make_future_dataframe(periods=30))
+                        weight, news_list = analyze_news_sentiment(target_name)
+                        
+                        curr_p = int(df['Close'].iloc[-1])
+                        ai_daily_raw = int(forecast_all[forecast_all['ds'] <= datetime.now()].iloc[-1]['yhat'])
+                        st.session_state.analysis_result = {
+                            "name": target_name, "curr": curr_p, "ai_daily": round_to_tick(ai_daily_raw),
+                            "news_reflect": round_to_tick(int(ai_daily_raw * (1 + weight))),
+                            "market_eval": ((curr_p - ai_daily_raw) / ai_daily_raw) * 100,
+                            "news": news_list, "weight": weight, "df": df, "forecast": forecast_all
+                        }
 
     if st.session_state.analysis_result:
         res = st.session_state.analysis_result
