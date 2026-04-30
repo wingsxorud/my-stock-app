@@ -11,7 +11,7 @@ import math
 import time
 
 # 1. 페이지 설정
-st.set_page_config(page_title="주식 분석기 v8.2.7", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="주식 분석기 v8.2.7-B", page_icon="🚀", layout="wide")
 
 if 'recs' not in st.session_state: st.session_state.recs = None
 if 'analysis_result' not in st.session_state: st.session_state.analysis_result = None
@@ -46,7 +46,7 @@ def round_to_tick(price):
     else: tick = 1000
     return int(math.floor(price / tick + 0.5) * tick)
 
-# [함수] 뉴스 분석 (고속/안정성 특화)
+# [함수] 뉴스 분석 (최신순 정렬 정밀 보정)
 def analyze_news_sentiment(stock_name):
     headers = {"User-Agent": "Mozilla/5.0"}
     pos_words = ['상승', '호재', '돌파', '수익', '긍정', '성장', '최고', '강세', '기대', '계약', '신고가', '수주']
@@ -54,14 +54,36 @@ def analyze_news_sentiment(stock_name):
     sentiment_score, news_data = 0, []
     try:
         rss_url = f"https://news.google.com/rss/search?q={stock_name}+주식&hl=ko&gl=KR&ceid=KR:ko"
-        res = requests.get(rss_url, headers=headers, timeout=2.5)
+        res = requests.get(rss_url, headers=headers, timeout=3.0)
         soup = BeautifulSoup(res.content, features="xml")
-        items = soup.findAll('item')[:5]
-        for i, item in enumerate(items):
+        items = soup.findAll('item')[:10]
+        
+        temp_list = []
+        for item in items:
             title = item.title.text
+            pub_date = item.pubDate.text if item.pubDate else ""
+            try:
+                # 구글 뉴스 표준 날짜 형식 파싱
+                dt_obj = datetime.strptime(pub_date, '%a, %d %b %Y %H:%M:%S %Z')
+            except:
+                dt_obj = datetime.now()
+                
             score = sum(1 for pw in pos_words if pw in title) - sum(1 for nw in neg_words if nw in title)
-            sentiment_score += (score * (1.1 - (i * 0.1)))
-            news_data.append({"title": title, "link": item.link.text, "source": item.source.text, "dt": item.pubDate.text})
+            temp_list.append({
+                "title": title, 
+                "link": item.link.text, 
+                "source": item.source.text if item.source else "뉴스", 
+                "dt": dt_obj,
+                "score": score
+            })
+        
+        # [핵심] 발행 시간 기준 내림차순(최신순) 정렬
+        temp_list.sort(key=lambda x: x['dt'], reverse=True)
+        
+        final_news = temp_list[:5]
+        for i, n in enumerate(final_news):
+            sentiment_score += (n['score'] * (1.1 - (i * 0.1)))
+            news_data.append(n)
     except: pass
     return max(min(sentiment_score * 0.015, 0.05), -0.05), news_data
 
@@ -80,14 +102,17 @@ def single_stock_worker(stock_info):
         return {'name': name, 'code': code, 'curr': curr_p, 'target': target_p, 'upside': upside}
     except: return None
 
+# [신규] 안전한 종목 리스트 획득 (검색 기능 복구의 핵심)
 @st.cache_data(ttl=3600)
-def get_large_pool():
-    """시총 상위 200개를 가져옵니다."""
+def get_safe_stock_list():
     try:
-        df_k = fdr.StockListing('KOSPI').head(100)
-        df_q = fdr.StockListing('KOSDAQ').head(100)
-        return pd.concat([df_k, df_q])[['Code', 'Name']].values.tolist()
-    except: return []
+        # KRX 전체 대신 KOSPI/KOSDAQ을 개별 호출하여 안정성 확보
+        df_k = fdr.StockListing('KOSPI')
+        df_q = fdr.StockListing('KOSDAQ')
+        return pd.concat([df_k, df_q])[['Code', 'Name']].drop_duplicates(subset=['Code'])
+    except:
+        # 실패 시 비상용 리스트
+        return pd.DataFrame([('005930', '삼성전자'), ('000660', 'SK하이닉스')], columns=['Code', 'Name'])
 
 # --- 메인 화면 ---
 st.title("🚀 이거 어때? 살까? 말까? 분석기")
@@ -100,9 +125,11 @@ with l_col:
         progress_text = st.empty()
         bar = st.progress(0)
         
-        pool = get_large_pool()
+        # 시총 상위 200개 추출 로직
+        pool_df = get_safe_stock_list()
+        pool = pool_df.head(200).values.tolist()
+        
         all_results = []
-        # [핵심] 20개씩 청크로 나누어 분석하여 안정성 확보
         chunk_size = 20
         chunks = [pool[i:i + chunk_size] for i in range(0, len(pool), chunk_size)]
         
@@ -112,7 +139,7 @@ with l_col:
             with ThreadPoolExecutor(max_workers=10) as executor:
                 batch_results = list(executor.map(single_stock_worker, chunk))
             all_results.extend([r for r in batch_results if r is not None])
-            time.sleep(0.5) # 서버 휴식 시간
+            time.sleep(0.5) 
             
         st.session_state.recs = sorted(all_results, key=lambda x: x['upside'], reverse=True)[:5]
         progress_text.text("✅ 분석 완료!")
@@ -127,8 +154,8 @@ with r_col:
     search_input = st.text_input("분석할 종목명을 입력하세요", placeholder="예: 삼성전자, SK하이닉스")
     
     if search_input:
-        stocks = fdr.StockListing('KRX')[['Code', 'Name']].drop_duplicates(subset=['Code'])
-        matched = stocks[stocks['Name'].str.contains(search_input, case=False) | stocks['Code'].str.contains(search_input)]
+        stocks_df = get_safe_stock_list() # 안정화된 리스트 호출
+        matched = stocks_df[stocks_df['Name'].str.contains(search_input, case=False) | stocks_df['Code'].str.contains(search_input)]
         
         if not matched.empty:
             if len(matched) > 1:
@@ -166,9 +193,12 @@ with r_col:
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=res['df'].index, y=res['df']['Close'], name='실제', line=dict(color='#00ff00')))
         fig.add_trace(go.Scatter(x=res['forecast']['ds'], y=res['forecast']['yhat']*(1+res['weight']), name='예측', line=dict(color='#ff00ff', dash='dash')))
-        fig.update_layout(template='plotly_dark', height=350, margin=dict(l=10,r=10,t=10,b=10))
+        fig.update_layout(template='plotly_dark', height=350, margin=dict(l=10,r=10,t=10,b=10), legend=dict(orientation="h", y=1.1))
         st.plotly_chart(fig, use_container_width=True)
         
-        st.subheader("📰 최신 뉴스")
+        st.subheader("📰 최신 뉴스 리포트 (최신순)")
         for n in res['news']:
-            st.markdown(f"""<div class="news-box"><span style="color:#888; font-size:0.75rem;">{n['dt']} | {n['source']}</span><br><a href="{n['link']}" target="_blank" style="text-decoration:none; color:white; font-size:0.95rem; font-weight:bold;">✅ {n['title']}</a></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="news-box">
+                <span style="color:#888; font-size:0.75rem;">{n['dt'].strftime('%m-%d %H:%M')} | {n['source']}</span><br>
+                <a href="{n['link']}" target="_blank" style="text-decoration:none; color:white; font-size:0.95rem; font-weight:bold;">✅ {n['title']}</a>
+            </div>""", unsafe_allow_html=True)
