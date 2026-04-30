@@ -90,12 +90,12 @@ def get_large_pool():
     except: return []
 
 # --- 메인 화면 ---
-st.title("🚀 주식 분석기 v8.2.7 (인피니티 200 스캐너)")
+st.title("🚀 이거 어때? 살까? 말까? 분석기")
 
 l_col, r_col = st.columns([1, 2.5])
 
 with l_col:
-    st.markdown('<div class="section-header">📡 전 종목 광역 레이더</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">📡 안테나 돌려서 추천받기</div>', unsafe_allow_html=True)
     if st.button("🔄 200대 종목 풀 스캔"):
         progress_text = st.empty()
         bar = st.progress(0)
