@@ -11,12 +11,12 @@ import math
 import time
 
 # 1. 페이지 설정
-st.set_page_config(page_title="주식 분석기 v8.2.9", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="주식 분석기 v8.2.7", page_icon="🚀", layout="wide")
 
 if 'recs' not in st.session_state: st.session_state.recs = None
 if 'analysis_result' not in st.session_state: st.session_state.analysis_result = None
 
-# [CSS 스타일] 반응형 및 모바일 최적화 레이아웃 유지
+# [CSS 스타일] 반응형 및 모바일 최적화 유지
 st.markdown("""
     <style>
     @media (max-width: 640px) {
@@ -32,11 +32,10 @@ st.markdown("""
     .metric-value { font-size: 1.4rem; font-weight: bold; color: #1a1c24; }
     .section-header { background-color: #f0f2f6; color: #1a1c24; padding: 8px 12px; border-radius: 8px; font-size: 1.2rem; font-weight: bold; margin-bottom: 12px; border-left: 5px solid #ff4b4b; }
     .news-box { background-color: #262730; padding: 10px; border-radius: 8px; border-left: 4px solid #ff4b4b; margin-bottom: 8px; border: 1px solid #3e3e3e; }
-    .news-date { color: #888; font-size: 0.75rem; margin-bottom: 4px; display: block; }
     </style>
     """, unsafe_allow_html=True)
 
-# [함수] 한국 거래소 호가 단위 보정 유지
+# [함수] 호가 단위 보정
 def round_to_tick(price):
     if price < 2000: tick = 1
     elif price < 5000: tick = 5
@@ -47,7 +46,7 @@ def round_to_tick(price):
     else: tick = 1000
     return int(math.floor(price / tick + 0.5) * tick)
 
-# [함수] 뉴스 분석 (최신순 정렬 로직 강화)
+# [함수] 뉴스 분석 (고속/안정성 특화)
 def analyze_news_sentiment(stock_name):
     headers = {"User-Agent": "Mozilla/5.0"}
     pos_words = ['상승', '호재', '돌파', '수익', '긍정', '성장', '최고', '강세', '기대', '계약', '신고가', '수주']
@@ -55,40 +54,18 @@ def analyze_news_sentiment(stock_name):
     sentiment_score, news_data = 0, []
     try:
         rss_url = f"https://news.google.com/rss/search?q={stock_name}+주식&hl=ko&gl=KR&ceid=KR:ko"
-        res = requests.get(rss_url, headers=headers, timeout=3.0)
+        res = requests.get(rss_url, headers=headers, timeout=2.5)
         soup = BeautifulSoup(res.content, features="xml")
-        items = soup.findAll('item')[:15]
-        
-        temp_list = []
-        for item in items:
+        items = soup.findAll('item')[:5]
+        for i, item in enumerate(items):
             title = item.title.text
-            pub_date = item.pubDate.text if item.pubDate else ""
-            try:
-                # 다양한 날짜 형식 대응을 위해 표준 파싱 시도
-                dt_obj = datetime.strptime(pub_date, '%a, %d %b %Y %H:%M:%S %Z')
-            except:
-                dt_obj = datetime.now()
-            
             score = sum(1 for pw in pos_words if pw in title) - sum(1 for nw in neg_words if nw in title)
-            temp_list.append({
-                "title": title, 
-                "link": item.link.text, 
-                "source": item.source.text if item.source else "뉴스", 
-                "dt": dt_obj,
-                "score": score
-            })
-        
-        # [핵심] 발행 시간 기준 내림차순(최신순) 정렬 보강
-        temp_list.sort(key=lambda x: x['dt'], reverse=True)
-        
-        final_news = temp_list[:5]
-        for i, n in enumerate(final_news):
-            sentiment_score += (n['score'] * (1.1 - (i * 0.1)))
-            news_data.append(n)
+            sentiment_score += (score * (1.1 - (i * 0.1)))
+            news_data.append({"title": title, "link": item.link.text, "source": item.source.text, "dt": item.pubDate.text})
     except: pass
     return max(min(sentiment_score * 0.015, 0.05), -0.05), news_data
 
-# [함수] 스캐너 워커 (v8.2.8 안정화 로직 유지)
+# [함수] 스캐너 워커
 def single_stock_worker(stock_info):
     code, name = stock_info
     try:
@@ -103,46 +80,43 @@ def single_stock_worker(stock_info):
         return {'name': name, 'code': code, 'curr': curr_p, 'target': target_p, 'upside': upside}
     except: return None
 
-# [함수] 종목 리스트 획득 (에러 방어막 유지)
 @st.cache_data(ttl=3600)
-def get_safe_stock_list():
+def get_large_pool():
+    """시총 상위 200개를 가져옵니다."""
     try:
-        df_k = fdr.StockListing('KOSPI')
-        df_q = fdr.StockListing('KOSDAQ')
-        return pd.concat([df_k, df_q])[['Code', 'Name']].drop_duplicates(subset=['Code'])
-    except:
-        return pd.DataFrame(columns=['Code', 'Name'])
+        df_k = fdr.StockListing('KOSPI').head(100)
+        df_q = fdr.StockListing('KOSDAQ').head(100)
+        return pd.concat([df_k, df_q])[['Code', 'Name']].values.tolist()
+    except: return []
 
 # --- 메인 화면 ---
-st.title("🚀 주식 분석기 v8.2.9")
+st.title("🚀 주식 분석기 v8.2.7 (인피니티 200 스캐너)")
 
 l_col, r_col = st.columns([1, 2.5])
 
 with l_col:
     st.markdown('<div class="section-header">📡 전 종목 광역 레이더</div>', unsafe_allow_html=True)
     if st.button("🔄 200대 종목 풀 스캔"):
-        pool_df = get_safe_stock_list()
-        if not pool_df.empty:
-            progress_text = st.empty()
-            bar = st.progress(0)
-            pool = pool_df.head(200).values.tolist()
-            all_results = []
-            chunk_size = 20
-            chunks = [pool[i:i + chunk_size] for i in range(0, len(pool), chunk_size)]
+        progress_text = st.empty()
+        bar = st.progress(0)
+        
+        pool = get_large_pool()
+        all_results = []
+        # [핵심] 20개씩 청크로 나누어 분석하여 안정성 확보
+        chunk_size = 20
+        chunks = [pool[i:i + chunk_size] for i in range(0, len(pool), chunk_size)]
+        
+        for idx, chunk in enumerate(chunks):
+            progress_text.text(f"분석 중: {idx*chunk_size}/{len(pool)} 완료...")
+            bar.progress((idx + 1) / len(chunks))
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                batch_results = list(executor.map(single_stock_worker, chunk))
+            all_results.extend([r for r in batch_results if r is not None])
+            time.sleep(0.5) # 서버 휴식 시간
             
-            for idx, chunk in enumerate(chunks):
-                progress_text.text(f"분석 중: {idx*chunk_size}/{len(pool)}...")
-                bar.progress((idx + 1) / len(chunks))
-                with ThreadPoolExecutor(max_workers=10) as executor:
-                    batch_results = list(executor.map(single_stock_worker, chunk))
-                all_results.extend([r for r in batch_results if r is not None])
-                time.sleep(0.5)
-            
-            st.session_state.recs = sorted(all_results, key=lambda x: x['upside'], reverse=True)[:5]
-            progress_text.text("✅ 분석 완료!")
-            bar.empty()
-        else:
-            st.error("거래소 데이터를 불러올 수 없습니다. F5를 눌러주세요.")
+        st.session_state.recs = sorted(all_results, key=lambda x: x['upside'], reverse=True)[:5]
+        progress_text.text("✅ 분석 완료!")
+        bar.empty()
 
     if st.session_state.recs:
         for r in st.session_state.recs:
@@ -153,32 +127,32 @@ with r_col:
     search_input = st.text_input("분석할 종목명을 입력하세요", placeholder="예: 삼성전자, SK하이닉스")
     
     if search_input:
-        stocks_df = get_safe_stock_list()
-        if not stocks_df.empty:
-            matched = stocks_df[stocks_df['Name'].str.contains(search_input, case=False) | stocks_df['Code'].str.contains(search_input)]
-            if not matched.empty:
-                if len(matched) > 1:
-                    sel = st.selectbox("🎯 종목 선택", ["--- 선택 ---"] + [f"{row['Name']} ({row['Code']})" for _, row in matched.iterrows()])
-                    target_code = sel.split('(')[1].replace(')', '') if sel != "--- 선택 ---" else ""
-                    target_name = sel.split(' (')[0] if sel != "--- 선택 ---" else ""
-                else: target_code = matched.iloc[0]['Code']; target_name = matched.iloc[0]['Name']
+        stocks = fdr.StockListing('KRX')[['Code', 'Name']].drop_duplicates(subset=['Code'])
+        matched = stocks[stocks['Name'].str.contains(search_input, case=False) | stocks['Code'].str.contains(search_input)]
+        
+        if not matched.empty:
+            if len(matched) > 1:
+                sel = st.selectbox("🎯 종목 선택", ["--- 선택 ---"] + [f"{row['Name']} ({row['Code']})" for _, row in matched.iterrows()])
+                target_code = sel.split('(')[1].replace(')', '') if sel != "--- 선택 ---" else ""
+                target_name = sel.split(' (')[0] if sel != "--- 선택 ---" else ""
+            else: target_code = matched.iloc[0]['Code']; target_name = matched.iloc[0]['Name']
 
-                if target_code and st.button(f"🚀 {target_name} 분석 시작"):
-                    with st.spinner('정밀 분석 중...'):
-                        df = fdr.DataReader(target_code, start="2023-01-01")
-                        df_p = df.reset_index()[['Date', 'Close']].rename(columns={'Date':'ds', 'Close':'y'})
-                        m = Prophet(daily_seasonality=True).fit(df_p)
-                        forecast_all = m.predict(m.make_future_dataframe(periods=30))
-                        weight, news_list = analyze_news_sentiment(target_name)
-                        
-                        curr_p = int(df['Close'].iloc[-1])
-                        ai_daily_raw = int(forecast_all[forecast_all['ds'] <= datetime.now()].iloc[-1]['yhat'])
-                        st.session_state.analysis_result = {
-                            "name": target_name, "curr": curr_p, "ai_daily": round_to_tick(ai_daily_raw),
-                            "news_reflect": round_to_tick(int(ai_daily_raw * (1 + weight))),
-                            "market_eval": ((curr_p - ai_daily_raw) / ai_daily_raw) * 100,
-                            "news": news_list, "weight": weight, "df": df, "forecast": forecast_all
-                        }
+            if target_code and st.button(f"🚀 {target_name} 분석 시작"):
+                with st.spinner('정밀 리포트 생성 중...'):
+                    df = fdr.DataReader(target_code, start="2023-01-01")
+                    df_p = df.reset_index()[['Date', 'Close']].rename(columns={'Date':'ds', 'Close':'y'})
+                    m = Prophet(daily_seasonality=True).fit(df_p)
+                    forecast_all = m.predict(m.make_future_dataframe(periods=30))
+                    weight, news_list = analyze_news_sentiment(target_name)
+                    
+                    curr_p = int(df['Close'].iloc[-1])
+                    ai_daily_raw = int(forecast_all[forecast_all['ds'] <= datetime.now()].iloc[-1]['yhat'])
+                    st.session_state.analysis_result = {
+                        "name": target_name, "curr": curr_p, "ai_daily": round_to_tick(ai_daily_raw),
+                        "news_reflect": round_to_tick(int(ai_daily_raw * (1 + weight))),
+                        "market_eval": ((curr_p - ai_daily_raw) / ai_daily_raw) * 100,
+                        "news": news_list, "weight": weight, "df": df, "forecast": forecast_all
+                    }
 
     if st.session_state.analysis_result:
         res = st.session_state.analysis_result
@@ -192,16 +166,9 @@ with r_col:
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=res['df'].index, y=res['df']['Close'], name='실제', line=dict(color='#00ff00')))
         fig.add_trace(go.Scatter(x=res['forecast']['ds'], y=res['forecast']['yhat']*(1+res['weight']), name='예측', line=dict(color='#ff00ff', dash='dash')))
-        fig.update_layout(template='plotly_dark', height=350, margin=dict(l=10,r=10,t=10,b=10), legend=dict(orientation="h", y=1.1))
+        fig.update_layout(template='plotly_dark', height=350, margin=dict(l=10,r=10,t=10,b=10))
         st.plotly_chart(fig, use_container_width=True)
         
-        # [복구 및 정렬 강화] 뉴스 리포트
-        st.subheader("📰 최신 뉴스 리포트 (최신순 정렬)")
-        if res['news']:
-            for n in res['news']:
-                st.markdown(f"""
-                <div class="news-box">
-                    <span class="news-date">{n['dt'].strftime('%m-%d %H:%M')} | {n['source']}</span>
-                    <a href="{n['link']}" target="_blank" style="text-decoration:none; color:white; font-size:0.95rem; font-weight:bold;">✅ {n['title']}</a>
-                </div>
-                """, unsafe_allow_html=True)
+        st.subheader("📰 최신 뉴스")
+        for n in res['news']:
+            st.markdown(f"""<div class="news-box"><span style="color:#888; font-size:0.75rem;">{n['dt']} | {n['source']}</span><br><a href="{n['link']}" target="_blank" style="text-decoration:none; color:white; font-size:0.95rem; font-weight:bold;">✅ {n['title']}</a></div>""", unsafe_allow_html=True)
