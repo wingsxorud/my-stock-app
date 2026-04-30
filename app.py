@@ -10,13 +10,13 @@ from concurrent.futures import ThreadPoolExecutor
 import math
 import time
 
-# 1. 페이지 설정 (v8.2.7 오리지널)
-st.set_page_config(page_title="주식 분석기 v8.2.7-Final", page_icon="🚀", layout="wide")
+# 1. 페이지 설정 (v8.2.7 오리지널 유지)
+st.set_page_config(page_title="주식 분석기 v8.2.7", page_icon="🚀", layout="wide")
 
 if 'recs' not in st.session_state: st.session_state.recs = None
 if 'analysis_result' not in st.session_state: st.session_state.analysis_result = None
 
-# [CSS 스타일] v8.2.7 오리지널 디자인 (모바일 최적화)
+# [CSS 스타일] v8.2.7 오리지널 유지
 st.markdown("""
     <style>
     @media (max-width: 640px) {
@@ -46,7 +46,7 @@ def round_to_tick(price):
     else: tick = 1000
     return int(math.floor(price / tick + 0.5) * tick)
 
-# [수정] 뉴스 분석 (최신순 정렬 정밀 보정)
+# [함수] 뉴스 분석 (정렬 로직 강화)
 def analyze_news_sentiment(stock_name):
     headers = {"User-Agent": "Mozilla/5.0"}
     pos_words = ['상승', '호재', '돌파', '수익', '긍정', '성장', '최고', '강세', '기대', '계약', '신고가', '수주']
@@ -54,7 +54,7 @@ def analyze_news_sentiment(stock_name):
     sentiment_score, news_data = 0, []
     try:
         rss_url = f"https://news.google.com/rss/search?q={stock_name}+주식&hl=ko&gl=KR&ceid=KR:ko"
-        res = requests.get(rss_url, headers=headers, timeout=3.0)
+        res = requests.get(rss_url, headers=headers, timeout=2.5)
         soup = BeautifulSoup(res.content, features="xml")
         items = soup.findAll('item')[:10]
         
@@ -64,11 +64,10 @@ def analyze_news_sentiment(stock_name):
             pub_date = item.pubDate.text if item.pubDate else ""
             try: dt_obj = datetime.strptime(pub_date, '%a, %d %b %Y %H:%M:%S %Z')
             except: dt_obj = datetime.now()
-            
             score = sum(1 for pw in pos_words if pw in title) - sum(1 for nw in neg_words if nw in title)
             temp_list.append({"title": title, "link": item.link.text, "source": item.source.text, "dt": dt_obj, "score": score})
         
-        # 최신순 정렬 보정
+        # 최신순 정렬
         temp_list.sort(key=lambda x: x['dt'], reverse=True)
         final_news = temp_list[:5]
         for i, n in enumerate(final_news):
@@ -77,7 +76,7 @@ def analyze_news_sentiment(stock_name):
     except: pass
     return max(min(sentiment_score * 0.015, 0.05), -0.05), news_data
 
-# [함수] 스캐너 워커 (v8.2.7 오리지널 로직)
+# [함수] 스캐너 워커
 def single_stock_worker(stock_info):
     code, name = stock_info
     try:
@@ -92,15 +91,13 @@ def single_stock_worker(stock_info):
         return {'name': name, 'code': code, 'curr': curr_p, 'target': target_p, 'upside': upside}
     except: return None
 
-# [수정] 종목 리스트 획득 (검색 기능 복구)
 @st.cache_data(ttl=3600)
 def get_large_pool():
     try:
         df_k = fdr.StockListing('KOSPI')
         df_q = fdr.StockListing('KOSDAQ')
         return pd.concat([df_k, df_q])[['Code', 'Name']].drop_duplicates()
-    except: 
-        return pd.DataFrame([('005930', '삼성전자')], columns=['Code', 'Name'])
+    except: return pd.DataFrame([('005930', '삼성전자')], columns=['Code', 'Name'])
 
 # --- 메인 화면 ---
 st.title("🚀 이거 어때? 살까? 말까? 분석기")
@@ -112,13 +109,11 @@ with l_col:
     if st.button("🔄 200대 종목 풀 스캔"):
         progress_text = st.empty()
         bar = st.progress(0)
-        
         pool_df = get_large_pool()
         pool = pool_df.head(200).values.tolist()
         all_results = []
         chunk_size = 20
         chunks = [pool[i:i + chunk_size] for i in range(0, len(pool), chunk_size)]
-        
         for idx, chunk in enumerate(chunks):
             progress_text.text(f"분석 중: {idx*chunk_size}/{len(pool)} 완료...")
             bar.progress((idx + 1) / len(chunks))
@@ -126,7 +121,6 @@ with l_col:
                 batch_results = list(executor.map(single_stock_worker, chunk))
             all_results.extend([r for r in batch_results if r is not None])
             time.sleep(0.5)
-            
         st.session_state.recs = sorted(all_results, key=lambda x: x['upside'], reverse=True)[:5]
         progress_text.text("✅ 분석 완료!")
         bar.empty()
@@ -140,7 +134,8 @@ with r_col:
     search_input = st.text_input("분석할 종목명을 입력하세요", placeholder="예: 삼성전자, SK하이닉스")
     
     if search_input:
-        stocks_df = get_large_pool() # 안정화된 리스트 호출
+        stocks_df = get_large_pool()
+        # [핵심 수리] 키워드가 포함된 모든 종목을 셀렉트 박스에 띄움
         matched = stocks_df[stocks_df['Name'].str.contains(search_input, case=False) | stocks_df['Code'].str.contains(search_input)]
         
         if not matched.empty:
@@ -149,7 +144,7 @@ with r_col:
                 target_code = sel.split('(')[1].replace(')', '')
                 target_name = sel.split(' (')[0]
                 if st.button(f"🚀 {target_name} 분석 시작"):
-                    with st.spinner('리포트 생성 중...'):
+                    with st.spinner('정밀 리포트 생성 중...'):
                         df = fdr.DataReader(target_code, start="2023-01-01")
                         df_p = df.reset_index()[['Date', 'Close']].rename(columns={'Date':'ds', 'Close':'y'})
                         m = Prophet(daily_seasonality=True).fit(df_p)
