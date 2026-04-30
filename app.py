@@ -11,12 +11,12 @@ import math
 import time
 
 # 1. 페이지 설정
-st.set_page_config(page_title="주식 분석기 v8.2.7-C", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="주식 분석기 v8.2.7-E", page_icon="🚀", layout="wide")
 
 if 'recs' not in st.session_state: st.session_state.recs = None
 if 'analysis_result' not in st.session_state: st.session_state.analysis_result = None
 
-# [CSS 스타일] 행님 요청 모바일 반응형 디자인 유지
+# [CSS 스타일]
 st.markdown("""
     <style>
     @media (max-width: 640px) {
@@ -46,7 +46,7 @@ def round_to_tick(price):
     else: tick = 1000
     return int(math.floor(price / tick + 0.5) * tick)
 
-# [함수] 뉴스 분석 (최신순 정렬 정밀 보정)
+# [함수] 뉴스 분석 (최신순 정렬)
 def analyze_news_sentiment(stock_name):
     headers = {"User-Agent": "Mozilla/5.0"}
     pos_words = ['상승', '호재', '돌파', '수익', '긍정', '성장', '최고', '강세', '기대', '계약', '신고가', '수주']
@@ -57,7 +57,6 @@ def analyze_news_sentiment(stock_name):
         res = requests.get(rss_url, headers=headers, timeout=3.0)
         soup = BeautifulSoup(res.content, features="xml")
         items = soup.findAll('item')[:10]
-        
         temp_list = []
         for item in items:
             title = item.title.text
@@ -65,8 +64,7 @@ def analyze_news_sentiment(stock_name):
             try: dt_obj = datetime.strptime(pub_date, '%a, %d %b %Y %H:%M:%S %Z')
             except: dt_obj = datetime.now()
             score = sum(1 for pw in pos_words if pw in title) - sum(1 for nw in neg_words if nw in title)
-            temp_list.append({"title": title, "link": item.link.text, "source": item.source.text, "dt": dt_obj, "score": score})
-        
+            temp_list.append({"title": title, "link": item.link.text, "source": item.source.text if item.source else "뉴스", "dt": dt_obj, "score": score})
         temp_list.sort(key=lambda x: x['dt'], reverse=True)
         final_news = temp_list[:5]
         for i, n in enumerate(final_news):
@@ -75,10 +73,11 @@ def analyze_news_sentiment(stock_name):
     except: pass
     return max(min(sentiment_score * 0.015, 0.05), -0.05), news_data
 
-# [신규] 안전한 종목 리스트 획득 (검색 기능 복구)
+# [함수] 전 종목 리스트 (에러 방어형)
 @st.cache_data(ttl=3600)
 def get_safe_stock_list():
     try:
+        # 이 부분이 행님이 말씀하신 '전체 종목'을 가져오는 핵심입니다.
         df_k = fdr.StockListing('KOSPI')
         df_q = fdr.StockListing('KOSDAQ')
         return pd.concat([df_k, df_q])[['Code', 'Name']].drop_duplicates(subset=['Code'])
@@ -106,27 +105,15 @@ st.title("🚀 이거 어때? 살까? 말까? 분석기")
 l_col, r_col = st.columns([1, 2.5])
 
 with l_col:
-    st.markdown('<div class="section-header">📡 안테나 돌려서 추천받기</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">📡 안테나 추천</div>', unsafe_allow_html=True)
     if st.button("🔄 200대 종목 풀 스캔"):
-        progress_text = st.empty()
-        bar = st.progress(0)
-        pool_df = get_safe_stock_list()
-        pool = pool_df.head(200).values.tolist()
-        
-        all_results = []
-        chunk_size = 20
-        chunks = [pool[i:i + chunk_size] for i in range(0, len(pool), chunk_size)]
-        for idx, chunk in enumerate(chunks):
-            progress_text.text(f"분석 중: {idx*chunk_size}/{len(pool)} 완료...")
-            bar.progress((idx + 1) / len(chunks))
+        with st.spinner("스캔 중..."):
+            pool_df = get_safe_stock_list()
+            pool = pool_df.head(200).values.tolist()
+            all_results = []
             with ThreadPoolExecutor(max_workers=10) as executor:
-                batch_results = list(executor.map(single_stock_worker, chunk))
-            all_results.extend([r for r in batch_results if r is not None])
-            time.sleep(0.5) 
-            
-        st.session_state.recs = sorted(all_results, key=lambda x: x['upside'], reverse=True)[:5]
-        progress_text.text("✅ 분석 완료!")
-        bar.empty()
+                all_results = list(executor.map(single_stock_worker, pool))
+            st.session_state.recs = sorted([r for r in all_results if r is not None], key=lambda x: x['upside'], reverse=True)[:5]
 
     if st.session_state.recs:
         for r in st.session_state.recs:
@@ -134,36 +121,38 @@ with l_col:
 
 with r_col:
     st.markdown('<div class="section-header">🔍 종목 정밀 분석</div>', unsafe_allow_html=True)
-    # [수정] 검색 안내 문구와 셀렉트 박스 로직 복구
-    search_input = st.text_input("분석할 종목명을 입력하세요", placeholder="예: 삼성전자, SK하이닉스")
+    # [수정] 행님이 '삼성'이라고 치면 여기서 필터링이 시작됩니다.
+    search_query = st.text_input("분석할 종목명을 입력하세요 (예: 삼성)", placeholder="삼성, 현대, SK 등")
     
-    if search_input:
+    if search_query:
         stocks_df = get_safe_stock_list()
-        matched = stocks_df[stocks_df['Name'].str.contains(search_input, case=False) | stocks_df['Code'].str.contains(search_input)]
+        # 입력한 글자가 포함된 모든 종목을 찾습니다.
+        matched = stocks_df[stocks_df['Name'].str.contains(search_query, case=False) | stocks_df['Code'].str.contains(search_query)]
         
         if not matched.empty:
-            # 여기서 셀렉트 박스가 나타납니다!
-            sel = st.selectbox("🎯 분석할 종목을 선택하세요", ["--- 선택 ---"] + [f"{row['Name']} ({row['Code']})" for _, row in matched.iterrows()])
+            options = ["--- 선택하세요 ---"] + [f"{row['Name']} ({row['Code']})" for _, row in matched.iterrows()]
+            selected = st.selectbox(f"🎯 '{search_query}' 검색 결과 ({len(matched)}건)", options)
             
-            if sel != "--- 선택 ---":
-                target_code = sel.split('(')[1].replace(')', '')
-                target_name = sel.split(' (')[0]
-
-                if st.button(f"🚀 {target_name} 정밀 분석 시작"):
+            if selected != "--- 선택하세요 ---":
+                target_code = selected.split('(')[1].replace(')', '')
+                target_name = selected.split(' (')[0]
+                
+                if st.button(f"🚀 {target_name} 분석 시작"):
                     with st.spinner('리포트 생성 중...'):
                         df = fdr.DataReader(target_code, start="2023-01-01")
                         df_p = df.reset_index()[['Date', 'Close']].rename(columns={'Date':'ds', 'Close':'y'})
                         m = Prophet(daily_seasonality=True).fit(df_p)
-                        forecast_all = m.predict(m.make_future_dataframe(periods=30))
-                        weight, news_list = analyze_news_sentiment(target_name)
+                        forecast = m.predict(m.make_future_dataframe(periods=30))
+                        weight, news = analyze_news_sentiment(target_name)
                         
                         curr_p = int(df['Close'].iloc[-1])
-                        ai_daily_raw = int(forecast_all[forecast_all['ds'] <= datetime.now()].iloc[-1]['yhat'])
+                        ai_raw = int(forecast[forecast['ds'] <= datetime.now()].iloc[-1]['yhat'])
+                        
                         st.session_state.analysis_result = {
-                            "name": target_name, "curr": curr_p, "ai_daily": round_to_tick(ai_daily_raw),
-                            "news_reflect": round_to_tick(int(ai_daily_raw * (1 + weight))),
-                            "market_eval": ((curr_p - ai_daily_raw) / ai_daily_raw) * 100,
-                            "news": news_list, "weight": weight, "df": df, "forecast": forecast_all
+                            "name": target_name, "curr": curr_p, "ai_daily": round_to_tick(ai_raw),
+                            "news_reflect": round_to_tick(int(ai_raw * (1 + weight))),
+                            "market_eval": ((curr_p - ai_raw) / ai_raw) * 100,
+                            "news": news, "df": df, "forecast": forecast, "weight": weight
                         }
 
     if st.session_state.analysis_result:
@@ -175,13 +164,15 @@ with r_col:
             <div class="metric-box"><span class="metric-label">시장평가</span><span class="metric-value" style="color: {'#ff4b4b' if res['market_eval'] > 0 else '#007bff'};">{res['market_eval']:+.3f}%</span></div>
         </div>""", unsafe_allow_html=True)
         
+        # 그래프
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=res['df'].index, y=res['df']['Close'], name='실제', line=dict(color='#00ff00')))
         fig.add_trace(go.Scatter(x=res['forecast']['ds'], y=res['forecast']['yhat']*(1+res['weight']), name='예측', line=dict(color='#ff00ff', dash='dash')))
         fig.update_layout(template='plotly_dark', height=350, margin=dict(l=10,r=10,t=10,b=10), legend=dict(orientation="h", y=1.1))
         st.plotly_chart(fig, use_container_width=True)
         
-        st.subheader("📰 최신 뉴스 리포트 (최신순)")
+        # 뉴스 리포트 (날짜 최신순)
+        st.subheader(f"📰 {res['name']} 최신 뉴스 리포트")
         for n in res['news']:
             st.markdown(f"""<div class="news-box">
                 <span style="color:#888; font-size:0.75rem;">{n['dt'].strftime('%m-%d %H:%M')} | {n['source']}</span><br>
