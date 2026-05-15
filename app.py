@@ -5,80 +5,83 @@ from prophet import Prophet
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
-# 1. 페이지 설정 및 모바일 최적화 레이아웃
-st.set_page_config(page_title="행님 주식 분석기 V3", layout="centered") # 모바일은 centered가 더 보기 편해
+# 1. 페이지 설정 및 모바일 최적화
+st.set_page_config(page_title="행님 주식 분석기 V3.5", layout="centered")
 
 st.markdown("""
     <style>
-    /* 모바일에서 메트릭 글자 크기 조정 */
-    [data-testid="stMetricValue"] { font-size: 1.8rem !important; }
+    [data-testid="stMetricValue"] { font-size: 1.6rem !important; }
+    .stButton>button { width: 100%; border-radius: 10px; height: 3em; background-color: #007bff; color: white; }
     .main { background-color: #f8f9fa; }
-    .stButton>button { width: 100%; border-radius: 20px; } /* 버튼을 큼직하게 */
     </style>
     """, unsafe_allow_html=True)
 
-# 2. 데이터 캐싱 및 종목 리스트 불러오기[cite: 1, 2]
-@st.cache_data(ttl=86400) # 종목 리스트는 하루에 한 번만 갱신
-def get_all_stock_list():
-    df_krx = fdr.StockListing('KRX') # 코스피, 코스닥, 코넥스 통합
-    # '종목명 (코드)' 형태로 리스트 생성
-    stock_list = [f"{row['Name']} ({row['Code']})" for _, row in df_krx.iterrows()]
-    return stock_list, df_krx
+# 2. 종목 리스트 캐싱 (한 번만 불러오기)[cite: 1, 2]
+@st.cache_data(ttl=86400)
+def get_stock_data():
+    df = fdr.StockListing('KRX')
+    # 검색 편의를 위해 '종목명' 리스트 생성
+    return df[['Code', 'Name']]
 
-stock_options, df_full_list = get_all_stock_list()
+stock_df = get_stock_data()
 
-# 3. 사이드바 및 검색 설정
-st.title("📱 주식 분석기 모바일 V3")
+# 3. 메인 화면 및 검색 로직
+st.title("📱 스마트 종목 분석기")
 
-with st.expander("🔍 종목 검색 및 설정", expanded=True):
-    # 종목명으로 검색하고 선택하는 박스 (자동완성 기능 포함)
-    selected_stock = st.selectbox(
-        "종목명을 입력하세요",
-        options=stock_options,
-        index=stock_options.index("삼성전자 (005930)") if "삼성전자 (005930)" in stock_options else 0
-    )
+with st.container():
+    st.subheader("🔍 종목 검색")
+    # 행님이 말한 '직접 입력' 부분! 검색어를 치면 아래 선택박스가 바뀜
+    search_input = st.text_input("종목명 또는 코드를 입력하세요", value="삼성전자")
     
-    # 선택된 텍스트에서 코드만 추출 (괄호 안의 6자리)
-    target_ticker = selected_stock.split('(')[-1].replace(')', '')
+    # 입력한 검색어가 포함된 종목들만 필터링
+    filtered_stocks = stock_df[
+        stock_df['Name'].str.contains(search_input, case=False, na=False) | 
+        stock_df['Code'].str.contains(search_input, na=False)
+    ]
     
-    col_a, col_b = st.columns(2)
-    with col_a:
-        data_range = st.number_input("데이터 기간(일)", value=365)
-    with col_b:
-        predict_range = st.number_input("예측 기간(일)", value=15)
+    if not filtered_stocks.empty:
+        # 필터링된 결과 중에서 선택[cite: 1]
+        options = [f"{row['Name']} ({row['Code']})" for _, row in filtered_stocks.iterrows()]
+        selected_full = st.selectbox(f"검색 결과 ({len(options)}건)", options)
+        target_ticker = selected_full.split('(')[-1].replace(')', '')
+    else:
+        st.error("검색 결과가 없습니다. 다시 입력해 주세요.")
+        target_ticker = None
 
-# 4. 분석 엔진 (데이터 로드 및 RSI)[cite: 1, 2]
-@st.cache_data(ttl=3600)
-def load_stock_data(ticker, days):
-    start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
-    return fdr.DataReader(ticker, start_date)
-
-def get_rsi(df):
-    delta = df['Close'].diff()
-    up, down = delta.copy(), delta.copy()
-    up[up < 0] = 0
-    down[down > 0] = 0
-    ema_up = up.ewm(com=13, adjust=False).mean()
-    ema_down = down.abs().ewm(com=13, adjust=False).mean()
-    return 100 - (100 / (1 + (ema_up / ema_down)))
-
-# 5. 메인 대시보드
+# 4. 분석 실행 섹션
 if target_ticker:
-    df = load_stock_data(target_ticker, data_range)
-    
+    col_set1, col_set2 = st.columns(2)
+    with col_set1:
+        data_range = st.number_input("분석 기간(일)", value=365, step=30)
+    with col_set2:
+        predict_range = st.number_input("예측 기간(일)", value=15, step=5)
+
+    # 데이터 로딩 함수[cite: 1, 2]
+    @st.cache_data(ttl=3600)
+    def load_data(ticker, days):
+        start = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+        return fdr.DataReader(ticker, start)
+
+    df = load_data(target_ticker, data_range)
+
     if df is not None and not df.empty:
-        # 지표 출력 (모바일 배려: 세로로 나열될 수 있게 컬럼 조정)
+        # 주요 지표 모바일 대응[cite: 1]
         m1, m2 = st.columns(2)
         curr_p = int(df['Close'].iloc[-1])
         diff = int(curr_p - df['Close'].iloc[-2])
-        rsi_val = get_rsi(df).iloc[-1]
         
-        m1.metric("현재가", f"{curr_p:,}원", f"{diff:,}원")
-        m2.metric("RSI 지수", f"{rsi_val:.1f}")
+        m1.metric(label="현재가", value=f"{curr_p:,}원", delta=f"{diff:,}원")
+        
+        # RSI 계산 로직[cite: 1]
+        delta = df['Close'].diff()
+        up = delta.clip(lower=0).ewm(com=13, adjust=False).mean()
+        down = (-1 * delta.clip(upper=0)).ewm(com=13, adjust=False).mean()
+        rsi = 100 - (100 / (1 + (up / down)))
+        m2.metric("RSI 지수", f"{rsi.iloc[-1]:.1f}")
 
-        # Prophet 예측
+        # Prophet 예측 차트[cite: 1]
         st.divider()
-        with st.spinner('AI 분석 중...'):
+        with st.spinner('AI가 미래를 보는 중...'):
             try:
                 m_df = df.reset_index()[['Date', 'Close']].rename(columns={'Date':'ds', 'Close':'y'})
                 m_df['ds'] = m_df['ds'].dt.tz_localize(None)
@@ -87,25 +90,12 @@ if target_ticker:
                 future = model.make_future_dataframe(periods=predict_range)
                 forecast = model.predict(future)
                 
-                # 차트 모바일 최적화 (여백 줄임)[cite: 1]
                 fig = go.Figure()
-                fig.add_trace(go.Scatter(x=m_df['ds'], y=m_df['y'], name='실제'))
-                fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], name='예측', line=dict(dash='dot')))
-                fig.update_layout(
-                    margin=dict(l=10, r=10, t=30, b=10),
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                    height=400
-                )
+                fig.add_trace(go.Scatter(x=m_df['ds'], y=m_df['y'], name='과거'))
+                fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], name='예측', line=dict(dash='dot', color='red')))
+                fig.update_layout(height=400, margin=dict(l=10, r=10, t=30, b=10), legend=dict(orientation="h", y=1.1))
                 st.plotly_chart(fig, use_container_width=True)
                 
-                pred_price = int(forecast['yhat'].iloc[-1])
-                st.info(f"💡 {predict_range}일 후 예상가: 약 {pred_price:,}원")
-                
-            except Exception as e:
-                st.error("예측 엔진 오류 발생")
-
-        # 상세 데이터
-        with st.expander("📊 과거 데이터 보기"):
-            st.dataframe(df.sort_index(ascending=False), use_container_width=True)
-    else:
-        st.error("데이터를 찾을 수 없습니다.")
+                st.success(f"🎯 {predict_range}일 뒤 예상가: 약 {int(forecast['yhat'].iloc[-1]):,}원")
+            except:
+                st.warning("예측 모델 생성 중 오류가 발생했습니다.")
